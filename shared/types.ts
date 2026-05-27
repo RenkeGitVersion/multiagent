@@ -43,6 +43,7 @@ export interface RouteOutput {
   intentStrength: IntentStrength;
   reason: string;
   confidence: number;
+  source: "strong-rule" | "model" | "rule-fallback";
 }
 
 export interface ChatMessage {

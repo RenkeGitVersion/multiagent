@@ -408,9 +408,16 @@ function renderRouteResult(result: (RouteOutput & { agentName: string }) | null)
   return (
     <>
       <strong>{result.intentStrength === "strong" ? "强意图" : "弱意图"}</strong>
+      <strong>来源：{routeSourceLabel(result.source)}</strong>
       <strong>Agent：{result.agentName}</strong>
       <strong>置信度：{Math.round(result.confidence * 100)}%</strong>
       <span>{result.reason}</span>
     </>
   );
+}
+
+function routeSourceLabel(source: RouteOutput["source"]): string {
+  if (source === "model") return "模型判断";
+  if (source === "strong-rule") return "强意图规则";
+  return "规则兜底";
 }

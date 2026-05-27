@@ -38,7 +38,9 @@ API token 只在后端读取，前端不会暴露。
 ```bash
 LLM_ROUTER_BASE_URL=https://api.openai.com/v1
 LLM_ROUTER_API_KEY=your_api_key
-LLM_ROUTER_MODEL=gpt-5.2
+LLM_ROUTER_MODEL=gpt-5.5
+LLM_ROUTER_WIRE_API=responses
+LLM_ROUTER_REASONING_EFFORT=high
 ```
 
 也可以填任何兼容 `/chat/completions` 的模型服务地址。
