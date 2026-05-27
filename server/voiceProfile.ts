@@ -39,7 +39,7 @@ export async function analyzeVoiceProfile(audioBuffer: Buffer, mimeType: string)
       scriptPath,
       wavPath,
       "--seconds",
-      "2",
+      "1.5",
       "--model-path",
       process.env.VOICE_PROFILE_MODEL_PATH ?? defaultModelPath
     ], {

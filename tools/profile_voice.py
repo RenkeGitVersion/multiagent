@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import os
 import time
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from transformers.models.wav2vec2.modeling_wav2vec2 import Wav2Vec2Model, Wav2Ve
 
 MODEL_ID = "audeering/wav2vec2-large-robust-6-ft-age-gender"
 TARGET_SAMPLE_RATE = 16000
+LOCAL_MODEL_PATH = "/Users/renke/.cache/huggingface/hub/models--audeering--wav2vec2-large-robust-6-ft-age-gender/snapshots/a681b720dafd12b9dd7b6d13fb437c7b6b197fd3"
 
 
 class ModelHead(nn.Module):
@@ -74,7 +76,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Estimate speaker age/gender with audeering 6-layer model.")
     parser.add_argument("audio", type=Path, help="16 kHz mono/stereo wav file")
     parser.add_argument("--seconds", type=float, default=4.0, help="Only use the first N seconds")
-    parser.add_argument("--model-path", default=MODEL_ID, help="HF model id or a local snapshot path")
+    parser.add_argument("--model-path", default=os.environ.get("VOICE_PROFILE_MODEL_PATH", LOCAL_MODEL_PATH), help="HF model id or a local snapshot path")
     args = parser.parse_args()
 
     started = time.perf_counter()
@@ -94,7 +96,7 @@ def main() -> None:
 
     age_years = float(logits_age[0][0].item() * 100)
     gender_probs = logits_gender[0].detach().cpu().numpy()
-    labels = ["child", "female", "male"]
+    labels = ["female", "male", "child"]
     best_index = int(np.argmax(gender_probs))
 
     print(json.dumps({

@@ -85,6 +85,7 @@ function App() {
     recognition.lang = "zh-CN";
     recognition.interimResults = true;
     recognition.continuous = false;
+    autoSendRef.current = true;
     recognition.onstart = () => {
       setTranscript("");
       latestTranscriptRef.current = "";
@@ -317,7 +318,7 @@ function App() {
 
         <div className="voice-panel">
           <button className={isListening ? "recording" : ""} onClick={toggleListening}>
-            {isListening ? "说完了，发送" : "开始录音"}
+            {isListening ? "正在听，停顿后自动发送" : "开始录音"}
           </button>
           <input
             value={draft}
