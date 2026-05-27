@@ -22,6 +22,9 @@ function App() {
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const latestAudioRef = useRef<Blob | null>(null);
+  const latestTranscriptRef = useRef("");
+  const autoSendRef = useRef(false);
+  const audioReadyResolverRef = useRef<((audio: Blob | null) => void) | null>(null);
   const requestAbortRef = useRef<AbortController | null>(null);
 
   const websocketUrl = useMemo(() => apiBase.replace(/^http/, "ws") + "/api/events", []);
@@ -64,9 +67,9 @@ function App() {
 
   async function toggleListening() {
     if (isListening) {
+      autoSendRef.current = true;
       recognitionRef.current?.stop();
-      mediaRecorderRef.current?.stop();
-      mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+      stopAudioCapture();
       setIsListening(false);
       return;
     }
@@ -84,6 +87,7 @@ function App() {
     recognition.continuous = false;
     recognition.onstart = () => {
       setTranscript("");
+      latestTranscriptRef.current = "";
       setIsListening(true);
       setStatus("正在听你说话");
     };
@@ -93,6 +97,7 @@ function App() {
         .join("");
       setTranscript(text);
       setDraft(text);
+      latestTranscriptRef.current = text;
     };
     recognition.onerror = () => {
       setStatus("语音识别失败，请检查麦克风权限或改用文本输入");
@@ -100,14 +105,23 @@ function App() {
     };
     recognition.onend = () => {
       setIsListening(false);
-      setStatus("语音识别完成");
+      stopAudioCapture();
+      const finalText = latestTranscriptRef.current.trim();
+      if (autoSendRef.current && finalText) {
+        setStatus("语音识别完成，正在自动发送");
+        autoSendRef.current = false;
+        void sendMessage(finalText);
+      } else {
+        autoSendRef.current = false;
+        setStatus(finalText ? "语音识别完成" : "没有识别到文字，请重试");
+      }
     };
     recognitionRef.current = recognition;
     recognition.start();
   }
 
-  async function sendMessage() {
-    const queryText = draft.trim();
+  async function sendMessage(textOverride?: string) {
+    const queryText = (textOverride ?? draft).trim();
     if (!queryText) return;
     appendMessage("user", queryText, currentAgent?.id);
     setDraft("");
@@ -119,6 +133,7 @@ function App() {
       requestAbortRef.current?.abort();
       const abortController = new AbortController();
       requestAbortRef.current = abortController;
+      await waitForAudioReady();
       const routedProfile = await resolveProfile(abortController.signal);
       setStatus("正在路由智能体");
       const response = await fetch(`${apiBase}/api/converse`, {
@@ -186,10 +201,37 @@ function App() {
     recorder.onstop = () => {
       latestAudioRef.current = new Blob(audioChunksRef.current, { type: mimeType });
       stream.getTracks().forEach((track) => track.stop());
+      audioReadyResolverRef.current?.(latestAudioRef.current);
+      audioReadyResolverRef.current = null;
     };
     mediaStreamRef.current = stream;
     mediaRecorderRef.current = recorder;
     recorder.start();
+  }
+
+  function stopAudioCapture() {
+    if (mediaRecorderRef.current?.state === "recording") {
+      mediaRecorderRef.current.stop();
+      return;
+    }
+    mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+  }
+
+  async function waitForAudioReady() {
+    if (latestAudioRef.current) return latestAudioRef.current;
+    if (mediaRecorderRef.current?.state === "recording") {
+      stopAudioCapture();
+    }
+    return new Promise<Blob | null>((resolve) => {
+      const timeout = window.setTimeout(() => {
+        audioReadyResolverRef.current = null;
+        resolve(latestAudioRef.current);
+      }, 1200);
+      audioReadyResolverRef.current = (audio) => {
+        window.clearTimeout(timeout);
+        resolve(audio);
+      };
+    });
   }
 
   async function resolveProfile(signal: AbortSignal): Promise<UserProfile> {
@@ -267,15 +309,15 @@ function App() {
           </label>
         </div>
 
-        <div className="profile-result">
+        <div className={voiceProfile?.source === "voice" ? "profile-result detected" : "profile-result"}>
           <span>声音画像</span>
-          <strong>{formatVoiceProfile(voiceProfile)}</strong>
+          {renderVoiceProfile(voiceProfile)}
           {isProfiling ? <em>识别中</em> : null}
         </div>
 
         <div className="voice-panel">
           <button className={isListening ? "recording" : ""} onClick={toggleListening}>
-            {isListening ? "停止录音" : "开始录音"}
+            {isListening ? "说完了，发送" : "开始录音"}
           </button>
           <input
             value={draft}
@@ -285,7 +327,7 @@ function App() {
             }}
             placeholder="也可以直接输入：叫小狐狸给我讲故事"
           />
-          <button onClick={sendMessage} disabled={isSending}>{isSending ? "发送中" : "发送"}</button>
+          <button onClick={() => sendMessage()} disabled={isSending}>{isSending ? "发送中" : "发送"}</button>
           <button className="terminate" onClick={terminateInteraction}>终止</button>
         </div>
         <p className="status">{status}{transcript ? ` · ${transcript}` : ""}</p>
@@ -328,10 +370,10 @@ function isTaskFiredEvent(payload: TaskFiredEvent | { type: string }): payload i
   return payload.type === "task:fired";
 }
 
-function formatVoiceProfile(result: VoiceProfileResult | null): string {
-  if (!result) return "未识别，使用手动画像";
-  if (result.source === "manual") return "无录音，使用手动画像";
-  if (result.source === "failed") return "识别失败，使用手动画像";
+function renderVoiceProfile(result: VoiceProfileResult | null) {
+  if (!result) return <strong>未识别，使用手动画像</strong>;
+  if (result.source === "manual") return <strong>无录音，使用手动画像</strong>;
+  if (result.source === "failed") return <strong>识别失败，使用手动画像</strong>;
   const ageLabels: Record<UserProfile["ageGroup"], string> = {
     child: "儿童",
     teen: "青少年",
@@ -343,5 +385,11 @@ function formatVoiceProfile(result: VoiceProfileResult | null): string {
     male: "男性",
     unknown: "未知"
   };
-  return `${ageLabels[result.ageGroup]} · ${genderLabels[result.gender]} · ${result.totalSeconds.toFixed(2)}s`;
+  return (
+    <>
+      <strong>年龄：{ageLabels[result.ageGroup]}（约 {result.ageYears.toFixed(1)} 岁）</strong>
+      <strong>性别：{genderLabels[result.gender]}（{Math.round(result.genderConfidence * 100)}%）</strong>
+      <strong>耗时：{result.totalSeconds.toFixed(2)}s</strong>
+    </>
+  );
 }

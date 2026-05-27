@@ -110,7 +110,17 @@ select {
   gap: 10px;
   min-height: 36px;
   margin-bottom: 14px;
+  padding: 10px 12px;
+  border: 1px solid #e4ded2;
+  border-radius: 8px;
+  background: #fbfaf6;
   color: #52605d;
+  flex-wrap: wrap;
+}
+
+.profile-result.detected {
+  border-color: #8dbdaf;
+  background: #eef8f4;
 }
 
 .profile-result strong {
