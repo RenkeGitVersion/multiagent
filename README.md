@@ -24,3 +24,15 @@ npm run dev
 4. 在 `server/cozeAdapter.ts` 内按账号实际开通的实时语音 API 补齐请求实现。
 
 API token 只在后端读取，前端不会暴露。
+
+## 本地声音画像测速
+
+项目内提供了一个可选脚本，用于测试轻量版年龄/性别识别模型：
+
+```bash
+python3.11 -m venv .venv-age
+.venv-age/bin/python -m pip install --upgrade pip torch torchaudio transformers huggingface_hub soundfile numpy
+.venv-age/bin/python tools/profile_voice.py path/to/voice_16k.wav --seconds 2
+```
+
+默认模型是 `audeering/wav2vec2-large-robust-6-ft-age-gender`，输入要求为 16 kHz WAV。首次运行会下载 Hugging Face 模型；缓存后在本机测试音频上，2 秒音频约 0.67 秒完成，4 秒音频约 1.01 秒完成。真实效果需要用中文人声样本再评估。
