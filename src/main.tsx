@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import type { AgentConfig, ChatMessage, ConverseResponse, Gender, TaskFiredEvent, UserProfile } from "../shared/types";
+import type { AgentConfig, ChatMessage, ConverseResponse, Gender, TaskFiredEvent, UserProfile, VoiceProfileResult } from "../shared/types";
 import "./styles.css";
 
 const apiBase = import.meta.env.VITE_API_BASE ?? "http://localhost:8787";
@@ -14,8 +14,14 @@ function App() {
   const [transcript, setTranscript] = useState("");
   const [isListening, setIsListening] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [isProfiling, setIsProfiling] = useState(false);
+  const [voiceProfile, setVoiceProfile] = useState<VoiceProfileResult | null>(null);
   const [status, setStatus] = useState("准备就绪");
   const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const latestAudioRef = useRef<Blob | null>(null);
   const requestAbortRef = useRef<AbortController | null>(null);
 
   const websocketUrl = useMemo(() => apiBase.replace(/^http/, "ws") + "/api/events", []);
@@ -56,9 +62,11 @@ function App() {
     ]);
   }
 
-  function toggleListening() {
+  async function toggleListening() {
     if (isListening) {
       recognitionRef.current?.stop();
+      mediaRecorderRef.current?.stop();
+      mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
       setIsListening(false);
       return;
     }
@@ -69,6 +77,7 @@ function App() {
       return;
     }
 
+    await startAudioCapture();
     const recognition = new Recognition();
     recognition.lang = "zh-CN";
     recognition.interimResults = true;
@@ -104,12 +113,14 @@ function App() {
     setDraft("");
     setTranscript("");
     setIsSending(true);
-    setStatus("正在路由智能体");
+    setStatus("正在识别声音画像");
 
     try {
       requestAbortRef.current?.abort();
       const abortController = new AbortController();
       requestAbortRef.current = abortController;
+      const routedProfile = await resolveProfile(abortController.signal);
+      setStatus("正在路由智能体");
       const response = await fetch(`${apiBase}/api/converse`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -117,7 +128,7 @@ function App() {
         body: JSON.stringify({
           queryText,
           currentAgentId: currentAgent?.id,
-          profile,
+          profile: routedProfile,
           conversationContext: messages
         })
       });
@@ -141,6 +152,10 @@ function App() {
   function terminateInteraction() {
     recognitionRef.current?.stop();
     recognitionRef.current = null;
+    mediaRecorderRef.current?.stop();
+    mediaRecorderRef.current = null;
+    mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+    mediaStreamRef.current = null;
     requestAbortRef.current?.abort();
     requestAbortRef.current = null;
     if ("speechSynthesis" in window) {
@@ -148,9 +163,62 @@ function App() {
     }
     setIsListening(false);
     setIsSending(false);
+    setIsProfiling(false);
     setTranscript("");
     setDraft("");
     setStatus("已手动终止");
+  }
+
+  async function startAudioCapture() {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setStatus("当前浏览器无法录制音频画像");
+      return;
+    }
+
+    audioChunksRef.current = [];
+    latestAudioRef.current = null;
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "audio/webm";
+    const recorder = new MediaRecorder(stream, { mimeType });
+    recorder.ondataavailable = (event) => {
+      if (event.data.size > 0) audioChunksRef.current.push(event.data);
+    };
+    recorder.onstop = () => {
+      latestAudioRef.current = new Blob(audioChunksRef.current, { type: mimeType });
+      stream.getTracks().forEach((track) => track.stop());
+    };
+    mediaStreamRef.current = stream;
+    mediaRecorderRef.current = recorder;
+    recorder.start();
+  }
+
+  async function resolveProfile(signal: AbortSignal): Promise<UserProfile> {
+    const audio = latestAudioRef.current;
+    if (!audio || audio.size === 0) {
+      setVoiceProfile({ ...profile, ageYears: 0, genderConfidence: 0, inferenceSeconds: 0, totalSeconds: 0, source: "manual" });
+      return profile;
+    }
+
+    setIsProfiling(true);
+    try {
+      const form = new FormData();
+      form.append("audio", audio, "voice.webm");
+      const response = await fetch(`${apiBase}/api/profile/audio`, {
+        method: "POST",
+        body: form,
+        signal
+      });
+      const result = (await response.json()) as VoiceProfileResult;
+      setVoiceProfile(result);
+      if (result.source === "voice") {
+        const nextProfile = { ageGroup: result.ageGroup, gender: result.gender };
+        setProfile(nextProfile);
+        return nextProfile;
+      }
+      return profile;
+    } finally {
+      setIsProfiling(false);
+    }
   }
 
   function speak(text: string) {
@@ -197,6 +265,12 @@ function App() {
               <option value="male">男性</option>
             </select>
           </label>
+        </div>
+
+        <div className="profile-result">
+          <span>声音画像</span>
+          <strong>{formatVoiceProfile(voiceProfile)}</strong>
+          {isProfiling ? <em>识别中</em> : null}
         </div>
 
         <div className="voice-panel">
@@ -252,4 +326,22 @@ createRoot(document.getElementById("root")!).render(<App />);
 
 function isTaskFiredEvent(payload: TaskFiredEvent | { type: string }): payload is TaskFiredEvent {
   return payload.type === "task:fired";
+}
+
+function formatVoiceProfile(result: VoiceProfileResult | null): string {
+  if (!result) return "未识别，使用手动画像";
+  if (result.source === "manual") return "无录音，使用手动画像";
+  if (result.source === "failed") return "识别失败，使用手动画像";
+  const ageLabels: Record<UserProfile["ageGroup"], string> = {
+    child: "儿童",
+    teen: "青少年",
+    adult: "成人",
+    senior: "老人"
+  };
+  const genderLabels: Record<Gender, string> = {
+    female: "女性",
+    male: "男性",
+    unknown: "未知"
+  };
+  return `${ageLabels[result.ageGroup]} · ${genderLabels[result.gender]} · ${result.totalSeconds.toFixed(2)}s`;
 }

@@ -36,3 +36,5 @@ python3.11 -m venv .venv-age
 ```
 
 默认模型是 `audeering/wav2vec2-large-robust-6-ft-age-gender`，输入要求为 16 kHz WAV。首次运行会下载 Hugging Face 模型；缓存后在本机测试音频上，2 秒音频约 0.67 秒完成，4 秒音频约 1.01 秒完成。真实效果需要用中文人声样本再评估。
+
+网页已接入声音画像：点击“开始录音”后会同时保存一小段浏览器音频，发送消息时先上传到 `/api/profile/audio`，后端用 `ffmpeg` 转成 16 kHz WAV，再调用本地 Python 模型输出 `ageGroup/gender`，并把结果用于本轮 agent 路由。当前实现每次请求都会启动一次 Python 进程，适合网页直接测试效果；如果要降低延迟，下一步应改成常驻 Python 推理服务。

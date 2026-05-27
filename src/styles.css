@@ -104,6 +104,29 @@ select {
   margin-bottom: 14px;
 }
 
+.profile-result {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  margin-bottom: 14px;
+  color: #52605d;
+}
+
+.profile-result strong {
+  color: #1d2626;
+  font-weight: 650;
+}
+
+.profile-result em {
+  padding: 4px 8px;
+  border-radius: 999px;
+  color: #246b5f;
+  background: #e7f1ee;
+  font-style: normal;
+  font-size: 13px;
+}
+
 label {
   display: grid;
   gap: 6px;

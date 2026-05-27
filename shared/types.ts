@@ -8,6 +8,15 @@ export interface UserProfile {
   gender: Gender;
 }
 
+export interface VoiceProfileResult extends UserProfile {
+  ageYears: number;
+  genderConfidence: number;
+  inferenceSeconds: number;
+  totalSeconds: number;
+  source: "voice" | "manual" | "failed";
+  error?: string;
+}
+
 export interface AgentConfig {
   id: string;
   cozeBotId: string;

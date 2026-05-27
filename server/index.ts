@@ -1,4 +1,5 @@
 import cors from "@fastify/cors";
+import multipart from "@fastify/multipart";
 import websocket from "@fastify/websocket";
 import "dotenv/config";
 import Fastify from "fastify";
@@ -8,6 +9,7 @@ import { CozeAdapter } from "./cozeAdapter";
 import { ManualProfileProvider } from "./profileProvider";
 import { routeAgent } from "./router";
 import { extractReminder, TaskMemory } from "./taskMemory";
+import { analyzeVoiceProfile } from "./voiceProfile";
 import type { ConverseRequest, TaskFiredEvent } from "../shared/types";
 
 const server = Fastify({ logger: true });
@@ -17,11 +19,27 @@ const tasks = new TaskMemory();
 const sockets = new Set<WebSocket>();
 
 await server.register(cors, { origin: true });
+await server.register(multipart, {
+  limits: {
+    fileSize: 1024 * 1024 * 8
+  }
+});
 await server.register(websocket);
 
 server.get("/api/agents", async () => ({ agents }));
 
 server.get("/api/tasks", async () => ({ tasks: tasks.list() }));
+
+server.post("/api/profile/audio", async (request, reply) => {
+  const audio = await request.file();
+  if (!audio) {
+    reply.code(400);
+    return { error: "Missing audio file" };
+  }
+
+  const buffer = await audio.toBuffer();
+  return analyzeVoiceProfile(buffer, audio.mimetype);
+});
 
 server.post<{ Body: ConverseRequest }>("/api/converse", async (request) => {
   const profile = await profiles.analyze({ metadata: request.body.profile });
