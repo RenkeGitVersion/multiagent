@@ -13,8 +13,10 @@ function App() {
   const [draft, setDraft] = useState("");
   const [transcript, setTranscript] = useState("");
   const [isListening, setIsListening] = useState(false);
+  const [isSending, setIsSending] = useState(false);
   const [status, setStatus] = useState("准备就绪");
   const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const requestAbortRef = useRef<AbortController | null>(null);
 
   const websocketUrl = useMemo(() => apiBase.replace(/^http/, "ws") + "/api/events", []);
 
@@ -101,12 +103,17 @@ function App() {
     appendMessage("user", queryText, currentAgent?.id);
     setDraft("");
     setTranscript("");
+    setIsSending(true);
     setStatus("正在路由智能体");
 
     try {
+      requestAbortRef.current?.abort();
+      const abortController = new AbortController();
+      requestAbortRef.current = abortController;
       const response = await fetch(`${apiBase}/api/converse`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: abortController.signal,
         body: JSON.stringify({
           queryText,
           currentAgentId: currentAgent?.id,
@@ -123,9 +130,27 @@ function App() {
           ? `已安排提醒：${new Date(data.task.triggerAt).toLocaleTimeString()}`
           : `${data.route.intentStrength === "strong" ? "强意图" : "弱意图"}路由到 ${data.agent.displayName}`
       );
-    } catch {
-      setStatus("后端请求失败，请确认服务已启动");
+    } catch (error) {
+      setStatus(error instanceof DOMException && error.name === "AbortError" ? "已手动终止" : "后端请求失败，请确认服务已启动");
+    } finally {
+      setIsSending(false);
+      requestAbortRef.current = null;
     }
+  }
+
+  function terminateInteraction() {
+    recognitionRef.current?.stop();
+    recognitionRef.current = null;
+    requestAbortRef.current?.abort();
+    requestAbortRef.current = null;
+    if ("speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
+    setIsListening(false);
+    setIsSending(false);
+    setTranscript("");
+    setDraft("");
+    setStatus("已手动终止");
   }
 
   function speak(text: string) {
@@ -186,7 +211,8 @@ function App() {
             }}
             placeholder="也可以直接输入：叫小狐狸给我讲故事"
           />
-          <button onClick={sendMessage}>发送</button>
+          <button onClick={sendMessage} disabled={isSending}>{isSending ? "发送中" : "发送"}</button>
+          <button className="terminate" onClick={terminateInteraction}>终止</button>
         </div>
         <p className="status">{status}{transcript ? ` · ${transcript}` : ""}</p>
       </section>

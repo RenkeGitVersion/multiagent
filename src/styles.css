@@ -135,8 +135,17 @@ button {
   cursor: pointer;
 }
 
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
 button.recording {
   background: #b94040;
+}
+
+button.terminate {
+  background: #2d3748;
 }
 
 .status {
