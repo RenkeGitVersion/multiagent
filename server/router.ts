@@ -50,7 +50,7 @@ export function routeAgentByRules(input: RouteInput): RouteOutput {
   };
 }
 
-function routeStrongIntent(query: string): RouteOutput | undefined {
+export function routeStrongIntent(query: string): RouteOutput | undefined {
   const strong = matchStrongIntent(query);
   if (!strong) return undefined;
   return {

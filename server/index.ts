@@ -7,7 +7,7 @@ import type { WebSocket } from "ws";
 import { agents, getAgentById } from "./agents";
 import { CozeAdapter } from "./cozeAdapter";
 import { ManualProfileProvider } from "./profileProvider";
-import { routeAgent } from "./router";
+import { routeAgent, routeStrongIntent } from "./router";
 import { extractReminder, TaskMemory } from "./taskMemory";
 import { analyzeVoiceProfile } from "./voiceProfile";
 import type { ConverseRequest, TaskFiredEvent } from "../shared/types";
@@ -29,6 +29,10 @@ await server.register(websocket);
 server.get("/api/agents", async () => ({ agents }));
 
 server.get("/api/tasks", async () => ({ tasks: tasks.list() }));
+
+server.post<{ Body: { queryText: string } }>("/api/route/strong", async (request) => ({
+  route: routeStrongIntent(request.body.queryText.trim()) ?? null
+}));
 
 server.post("/api/profile/audio", async (request, reply) => {
   const audio = await request.file();

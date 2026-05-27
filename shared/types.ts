@@ -13,7 +13,7 @@ export interface VoiceProfileResult extends UserProfile {
   genderConfidence: number;
   inferenceSeconds: number;
   totalSeconds: number;
-  source: "voice" | "manual" | "failed";
+  source: "voice" | "manual" | "failed" | "skipped";
   error?: string;
 }
 

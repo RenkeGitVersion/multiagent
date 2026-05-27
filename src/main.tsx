@@ -129,14 +129,14 @@ function App() {
     setDraft("");
     setTranscript("");
     setIsSending(true);
-    setStatus("正在识别声音画像");
+    setStatus("正在判断意图");
 
     try {
       requestAbortRef.current?.abort();
       const abortController = new AbortController();
       requestAbortRef.current = abortController;
-      await waitForAudioReady();
-      const routedProfile = await resolveProfile(abortController.signal);
+      const strongRoute = await detectStrongIntent(queryText, abortController.signal);
+      const routedProfile = strongRoute ? skipVoiceProfile() : await resolveVoiceProfile(abortController.signal);
       setStatus("正在路由智能体");
       const response = await fetch(`${apiBase}/api/converse`, {
         method: "POST",
@@ -238,7 +238,32 @@ function App() {
     });
   }
 
-  async function resolveProfile(signal: AbortSignal): Promise<UserProfile> {
+  async function detectStrongIntent(queryText: string, signal: AbortSignal): Promise<boolean> {
+    const response = await fetch(`${apiBase}/api/route/strong`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal,
+      body: JSON.stringify({ queryText })
+    });
+    const result = await response.json() as { route: RouteOutput | null };
+    return result.route?.intentStrength === "strong";
+  }
+
+  function skipVoiceProfile(): UserProfile {
+    setVoiceProfile({
+      ...profile,
+      ageYears: 0,
+      genderConfidence: 0,
+      inferenceSeconds: 0,
+      totalSeconds: 0,
+      source: "skipped"
+    });
+    return profile;
+  }
+
+  async function resolveVoiceProfile(signal: AbortSignal): Promise<UserProfile> {
+    setStatus("正在识别声音画像");
+    await waitForAudioReady();
     const audio = latestAudioRef.current;
     if (!audio || audio.size === 0) {
       setVoiceProfile({ ...profile, ageYears: 0, genderConfidence: 0, inferenceSeconds: 0, totalSeconds: 0, source: "manual" });
@@ -382,6 +407,7 @@ function isTaskFiredEvent(payload: TaskFiredEvent | { type: string }): payload i
 function renderVoiceProfile(result: VoiceProfileResult | null) {
   if (!result) return <strong>未识别，使用手动画像</strong>;
   if (result.source === "manual") return <strong>无录音，使用手动画像</strong>;
+  if (result.source === "skipped") return <strong>强意图已明确，跳过声音画像</strong>;
   if (result.source === "failed") return <strong>识别失败，使用手动画像</strong>;
   const ageLabels: Record<UserProfile["ageGroup"], string> = {
     child: "儿童",
