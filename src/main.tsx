@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import type { AgentConfig, ChatMessage, ConverseResponse, Gender, TaskFiredEvent, UserProfile, VoiceProfileResult } from "../shared/types";
+import type { AgentConfig, ChatMessage, ConverseResponse, Gender, RouteOutput, TaskFiredEvent, UserProfile, VoiceProfileResult } from "../shared/types";
 import "./styles.css";
 
 const apiBase = import.meta.env.VITE_API_BASE ?? "http://localhost:8787";
@@ -16,6 +16,7 @@ function App() {
   const [isSending, setIsSending] = useState(false);
   const [isProfiling, setIsProfiling] = useState(false);
   const [voiceProfile, setVoiceProfile] = useState<VoiceProfileResult | null>(null);
+  const [routeResult, setRouteResult] = useState<(RouteOutput & { agentName: string }) | null>(null);
   const [status, setStatus] = useState("准备就绪");
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -150,6 +151,7 @@ function App() {
       });
       const data = (await response.json()) as ConverseResponse;
       setCurrentAgent(data.agent);
+      setRouteResult({ ...data.route, agentName: data.agent.displayName });
       appendMessage("assistant", data.assistantText, data.agent.id);
       speak(data.assistantText);
       setStatus(
@@ -180,6 +182,7 @@ function App() {
     setIsListening(false);
     setIsSending(false);
     setIsProfiling(false);
+    setRouteResult(null);
     setTranscript("");
     setDraft("");
     setStatus("已手动终止");
@@ -316,6 +319,11 @@ function App() {
           {isProfiling ? <em>识别中</em> : null}
         </div>
 
+        <div className={routeResult ? "route-result detected" : "route-result"}>
+          <span>路由判断</span>
+          {renderRouteResult(routeResult)}
+        </div>
+
         <div className="voice-panel">
           <button className={isListening ? "recording" : ""} onClick={toggleListening}>
             {isListening ? "正在听，停顿后自动发送" : "开始录音"}
@@ -391,6 +399,18 @@ function renderVoiceProfile(result: VoiceProfileResult | null) {
       <strong>年龄：{ageLabels[result.ageGroup]}（约 {result.ageYears.toFixed(1)} 岁）</strong>
       <strong>性别：{genderLabels[result.gender]}（{Math.round(result.genderConfidence * 100)}%）</strong>
       <strong>耗时：{result.totalSeconds.toFixed(2)}s</strong>
+    </>
+  );
+}
+
+function renderRouteResult(result: (RouteOutput & { agentName: string }) | null) {
+  if (!result) return <strong>等待用户输入</strong>;
+  return (
+    <>
+      <strong>{result.intentStrength === "strong" ? "强意图" : "弱意图"}</strong>
+      <strong>Agent：{result.agentName}</strong>
+      <strong>置信度：{Math.round(result.confidence * 100)}%</strong>
+      <span>{result.reason}</span>
     </>
   );
 }

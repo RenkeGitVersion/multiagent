@@ -104,7 +104,8 @@ select {
   margin-bottom: 14px;
 }
 
-.profile-result {
+.profile-result,
+.route-result {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -118,17 +119,20 @@ select {
   flex-wrap: wrap;
 }
 
-.profile-result.detected {
+.profile-result.detected,
+.route-result.detected {
   border-color: #8dbdaf;
   background: #eef8f4;
 }
 
-.profile-result strong {
+.profile-result strong,
+.route-result strong {
   color: #1d2626;
   font-weight: 650;
 }
 
-.profile-result em {
+.profile-result em,
+.route-result em {
   padding: 4px 8px;
   border-radius: 999px;
   color: #246b5f;
