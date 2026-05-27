@@ -25,6 +25,24 @@ npm run dev
 
 API token 只在后端读取，前端不会暴露。
 
+## 意图路由
+
+当前路由流程：
+
+1. 强意图先用规则匹配 agent 名称、别名和唤醒词。
+2. 弱意图优先调用 OpenAI-compatible Chat Completions 模型路由。
+3. 如果没有配置模型或模型调用失败，自动回退到本地规则和打分。
+
+可选模型路由配置：
+
+```bash
+LLM_ROUTER_BASE_URL=https://api.openai.com/v1
+LLM_ROUTER_API_KEY=your_api_key
+LLM_ROUTER_MODEL=gpt-5.2
+```
+
+也可以填任何兼容 `/chat/completions` 的模型服务地址。
+
 ## 本地声音画像测速
 
 项目内提供了一个可选脚本，用于测试轻量版年龄/性别识别模型：

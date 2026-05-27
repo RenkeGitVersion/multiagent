@@ -43,7 +43,7 @@ server.post("/api/profile/audio", async (request, reply) => {
 
 server.post<{ Body: ConverseRequest }>("/api/converse", async (request) => {
   const profile = await profiles.analyze({ metadata: request.body.profile });
-  const route = routeAgent({
+  const route = await routeAgent({
     ...request.body,
     profile
   });
