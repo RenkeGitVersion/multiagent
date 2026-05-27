@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" role="img" aria-label="小狐狸">
+  <rect width="240" height="240" rx="28" fill="#fff6df"/>
+  <circle cx="120" cy="126" r="64" fill="#e97837"/>
+  <path d="M70 82 98 40l20 54zM170 82l-28-42-20 54z" fill="#c9552f"/>
+  <circle cx="96" cy="122" r="9" fill="#263230"/>
+  <circle cx="144" cy="122" r="9" fill="#263230"/>
+  <path d="M112 140h16l-8 8z" fill="#263230"/>
+  <path d="M80 152c24 34 56 34 80 0-30 12-50 12-80 0z" fill="#fff4df"/>
+  <text x="120" y="210" text-anchor="middle" font-family="Arial" font-size="22" fill="#68432f">小狐狸</text>
+</svg>

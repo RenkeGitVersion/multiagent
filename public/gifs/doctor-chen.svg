@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" role="img" aria-label="陈医生">
+  <rect width="240" height="240" rx="28" fill="#eef8fb"/>
+  <circle cx="120" cy="82" r="40" fill="#f2c7a8"/>
+  <path d="M62 210c8-58 34-86 58-86s50 28 58 86z" fill="#ffffff" stroke="#b9d5de" stroke-width="4"/>
+  <path d="M96 155h48M120 131v48" stroke="#3e8ea1" stroke-width="10" stroke-linecap="round"/>
+  <circle cx="105" cy="78" r="5" fill="#263230"/>
+  <circle cx="135" cy="78" r="5" fill="#263230"/>
+  <path d="M104 98c12 8 22 8 34 0" stroke="#263230" stroke-width="4" fill="none" stroke-linecap="round"/>
+  <text x="120" y="226" text-anchor="middle" font-family="Arial" font-size="20" fill="#38606a">陈医生</text>
+</svg>

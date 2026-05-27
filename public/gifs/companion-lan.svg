@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" role="img" aria-label="兰兰">
+  <rect width="240" height="240" rx="28" fill="#f8eef3"/>
+  <circle cx="120" cy="104" r="52" fill="#ecc0b7"/>
+  <path d="M72 94c8-42 38-58 72-44 20 8 32 26 28 58-34-18-62-20-100-14z" fill="#6d5877"/>
+  <circle cx="102" cy="108" r="6" fill="#263230"/>
+  <circle cx="138" cy="108" r="6" fill="#263230"/>
+  <path d="M102 130c13 12 24 12 36 0" stroke="#263230" stroke-width="4" fill="none" stroke-linecap="round"/>
+  <path d="M62 210c8-42 30-68 58-68s50 26 58 68z" fill="#b86f86"/>
+  <text x="120" y="226" text-anchor="middle" font-family="Arial" font-size="20" fill="#7f4b61">兰兰</text>
+</svg>

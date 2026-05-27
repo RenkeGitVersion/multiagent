@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" role="img" aria-label="生活管家">
+  <rect width="240" height="240" rx="28" fill="#f3f0ea"/>
+  <circle cx="120" cy="94" r="42" fill="#caa987"/>
+  <path d="M70 210c7-50 27-80 50-80s43 30 50 80z" fill="#385a54"/>
+  <path d="M88 140h64l-32 34z" fill="#ffffff"/>
+  <circle cx="104" cy="90" r="5" fill="#1f2c2a"/>
+  <circle cx="136" cy="90" r="5" fill="#1f2c2a"/>
+  <path d="M100 112c14 8 26 8 40 0" stroke="#1f2c2a" stroke-width="4" fill="none" stroke-linecap="round"/>
+  <text x="120" y="226" text-anchor="middle" font-family="Arial" font-size="20" fill="#385a54">生活管家</text>
+</svg>
