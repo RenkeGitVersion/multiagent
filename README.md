@@ -32,7 +32,9 @@ COZE_USE_MOCK=false
 COZE_USE_CLI_TOKEN=true
 ```
 
-`COZE_USE_CLI_TOKEN=true` 时会读取 `coze auth login --oauth` 保存的 CLI OAuth token。实测你自己的“小虎”智能体 `7645562795198742562` 可调用；公开英语学习智能体 `7374811613293150208` 返回资源不存在/未授权，不能直接作为 API bot 使用，需要换成你自己空间里已发布到 Agent as API 的英语学习 bot。
+`COZE_USE_CLI_TOKEN=true` 时会读取 `coze auth login --oauth` 保存的 CLI OAuth token。实测你自己的“小虎”智能体 `7645562795198742562` 可通过 OpenAPI 调用；API 管理页里的 `cztei_...` token 在当前 `/v3/chat` Bearer 调用下返回 4101，可能属于 Playground/Chat SDK 渠道令牌，不等同于 OpenAPI OAuth token。公开英语学习智能体 `7374811613293150208` 返回资源不存在/未授权，不能直接作为 API bot 使用，需要换成你自己空间里已发布到 Agent as API 的英语学习 bot。
+
+Coze Chat SDK 适合直接在网页中嵌入官方聊天窗，配置项包括 `type=bot`、`bot_id` 和 `isIframe` 等；当前 demo 是自定义多智能体路由 UI，因此默认使用后端 OpenAPI 获取回复。如果希望某个 agent 点击后直接打开 Coze 官方聊天窗，可以单独接 Chat SDK。
 
 ## Agent World
 

@@ -52,7 +52,8 @@ export class CozeAdapter {
           {
             role: "user",
             content: input.queryText,
-            content_type: "text"
+            content_type: "text",
+            type: "question"
           }
         ]
       })
