@@ -1,4 +1,5 @@
 import type { AgentConfig, ChatMessage } from "../shared/types";
+import { readFileSync } from "node:fs";
 
 interface GenerateReplyInput {
   agent: AgentConfig;
@@ -10,22 +11,36 @@ export class CozeAdapter {
   private readonly useMock = process.env.COZE_USE_MOCK !== "false";
 
   async generateReply(input: GenerateReplyInput): Promise<string> {
-    if (this.useMock || !process.env.COZE_API_TOKEN) {
+    const token = this.getCozeToken();
+    if (this.useMock || !token) {
       return this.generateMockReply(input);
     }
 
-    const reply = await this.generateCozeReply(input);
+    const reply = await this.generateCozeReply(input, token);
     return reply ?? this.generateMockReply(input);
   }
 
-  private async generateCozeReply(input: GenerateReplyInput): Promise<string | undefined> {
+  private getCozeToken(): string | undefined {
+    if (process.env.COZE_USE_CLI_TOKEN === "true") {
+      try {
+        const config = JSON.parse(readFileSync(`${process.env.HOME}/.coze/config.json`, "utf8")) as { accessToken?: string };
+        return config.accessToken;
+      } catch {
+        return undefined;
+      }
+    }
+    return process.env.COZE_API_TOKEN;
+  }
+
+  private async generateCozeReply(input: GenerateReplyInput, token: string): Promise<string | undefined> {
     if (input.agent.cozeBotId.startsWith("replace_with_")) return undefined;
 
     const apiBase = process.env.COZE_API_BASE ?? "https://api.coze.cn";
-    const response = await fetch(`${apiBase.replace(/\/$/, "")}/v3/chat`, {
+    const apiRoot = apiBase.replace(/\/$/, "");
+    const response = await fetch(`${apiRoot}/v3/chat`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${process.env.COZE_API_TOKEN}`,
+        Authorization: `Bearer ${token}`,
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
@@ -45,14 +60,65 @@ export class CozeAdapter {
 
     if (!response.ok) return undefined;
     const payload = await response.json() as {
+      code?: number;
+      msg?: string;
       data?: {
+        id?: string;
+        conversation_id?: string;
+        status?: string;
         messages?: Array<{ type?: string; content?: string }>;
       };
       messages?: Array<{ type?: string; content?: string }>;
     };
+    if (payload.code && payload.code !== 0) {
+      console.warn(`Coze API error for ${input.agent.displayName}: ${payload.code} ${payload.msg ?? ""}`);
+      return undefined;
+    }
+
+    const chatId = payload.data?.id;
+    const conversationId = payload.data?.conversation_id;
+    if (chatId && conversationId) {
+      await this.pollChat(apiRoot, chatId, conversationId, token);
+      const answer = await this.getChatAnswer(apiRoot, chatId, conversationId, token);
+      if (answer) return answer;
+    }
+
     const messages = payload.data?.messages ?? payload.messages ?? [];
     return messages.find((message) => message.type === "answer" && message.content)?.content
       ?? messages.find((message) => message.content)?.content;
+  }
+
+  private async pollChat(apiRoot: string, chatId: string, conversationId: string, token: string): Promise<void> {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const response = await fetch(`${apiRoot}/v3/chat/retrieve?chat_id=${chatId}&conversation_id=${conversationId}`, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        }
+      });
+      if (response.ok) {
+        const payload = await response.json() as { data?: { status?: string; last_error?: { code?: number; msg?: string } } };
+        const status = payload.data?.status;
+        if (status === "completed" || status === "failed" || status === "requires_action" || status === "canceled") return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    }
+  }
+
+  private async getChatAnswer(apiRoot: string, chatId: string, conversationId: string, token: string): Promise<string | undefined> {
+    const response = await fetch(`${apiRoot}/v3/chat/message/list?chat_id=${chatId}&conversation_id=${conversationId}`, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      }
+    });
+    if (!response.ok) return undefined;
+    const payload = await response.json() as { data?: Array<{ type?: string; role?: string; content?: string }> };
+    const messages = payload.data ?? [];
+    return messages.find((message) => message.type === "answer" && message.content)?.content
+      ?? messages.find((message) => message.role === "assistant" && message.content)?.content;
   }
 
   private generateMockReply(input: GenerateReplyInput): string {

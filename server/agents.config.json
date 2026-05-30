@@ -1,18 +1,18 @@
 [
   {
     "id": "little-fox",
-    "cozeBotId": "replace_with_little_fox_coze_bot_id",
+    "cozeBotId": "7645562795198742562",
     "cozeVoiceId": "replace_with_little_fox_voice_id",
-    "agentWorldUsername": "little-fox-storyteller",
+    "agentWorldUsername": "little-tiger-companion",
     "agentWorldApiKey": "",
-    "displayName": "小狐狸",
-    "aliases": ["小狐狸", "狐狸", "故事狐狸", "可爱狐狸"],
-    "personaTags": ["可爱", "温和", "讲故事", "儿童陪伴"],
+    "displayName": "小虎",
+    "aliases": ["小虎", "虎虎", "小老虎", "儿童陪伴", "陪小朋友"],
+    "personaTags": ["活泼", "温和", "语音互动", "儿童陪伴"],
     "targetAgeGroups": ["child", "teen"],
     "targetGenders": ["unknown", "female", "male"],
     "serviceScenes": ["故事", "睡前", "闲聊", "作业提醒", "儿童陪伴"],
     "gifPath": "/gifs/little-fox.svg",
-    "defaultPromptHint": "用可爱、温和、适合儿童理解的方式回应。",
+    "defaultPromptHint": "用活泼、温和、适合儿童理解的方式进行语音陪伴互动。",
     "priority": 100
   },
   {
@@ -33,18 +33,18 @@
   },
   {
     "id": "study-coach",
-    "cozeBotId": "replace_with_study_coach_coze_bot_id",
+    "cozeBotId": "replace_with_english_learning_coze_bot_id",
     "cozeVoiceId": "replace_with_study_coach_voice_id",
     "agentWorldUsername": "study-coach-guide",
     "agentWorldApiKey": "",
-    "displayName": "学习教练",
-    "aliases": ["学习教练", "老师", "学习助手", "作业老师"],
-    "personaTags": ["耐心", "学习规划", "作业辅导"],
+    "displayName": "英语学习",
+    "aliases": ["英语学习", "英语老师", "学习教练", "老师", "学习助手", "作业老师"],
+    "personaTags": ["耐心", "英语学习", "口语练习", "单词辅导"],
     "targetAgeGroups": ["child", "teen", "adult"],
     "targetGenders": ["unknown", "female", "male"],
     "serviceScenes": ["学习", "作业", "考试", "计划", "辅导"],
     "gifPath": "/gifs/study-coach.svg",
-    "defaultPromptHint": "用鼓励、清晰的方式帮助用户拆解学习任务。",
+    "defaultPromptHint": "用鼓励、清晰的方式帮助用户学习英语、练口语和背单词。",
     "priority": 80
   },
   {

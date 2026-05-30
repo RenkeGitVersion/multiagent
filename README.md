@@ -21,9 +21,18 @@ npm run dev
 1. 在 `.env` 填入 `COZE_API_TOKEN`。
 2. 在 `server/agents.config.json` 替换每个 `cozeBotId` 和可选的 `cozeVoiceId`。
 3. 将 `COZE_USE_MOCK=false`。
-4. 当前真实模式会优先调用 Coze `/v3/chat` 文本接口；实时语音输出仍需按你的 Coze 账号语音 API 权限继续补齐。
+4. 当前真实模式会调用 Coze `/v3/chat` 创建会话，并轮询 `/v3/chat/retrieve` 与 `/v3/chat/message/list` 获取回复；实时语音输出仍需按你的 Coze 账号语音 API 权限继续补齐。
 
 API token 只在后端读取，前端不会暴露。
+
+本地 `.env` 可设置：
+
+```bash
+COZE_USE_MOCK=false
+COZE_USE_CLI_TOKEN=true
+```
+
+`COZE_USE_CLI_TOKEN=true` 时会读取 `coze auth login --oauth` 保存的 CLI OAuth token。实测你自己的“小虎”智能体 `7645562795198742562` 可调用；公开英语学习智能体 `7374811613293150208` 返回资源不存在/未授权，不能直接作为 API bot 使用，需要换成你自己空间里已发布到 Agent as API 的英语学习 bot。
 
 ## Agent World
 
