@@ -36,6 +36,20 @@ COZE_USE_CLI_TOKEN=true
 
 Coze Chat SDK 适合直接在网页中嵌入官方聊天窗，配置项包括 `type=bot`、`bot_id` 和 `isIframe` 等；当前 demo 是自定义多智能体路由 UI，因此默认使用后端 OpenAPI 获取回复。如果希望某个 agent 点击后直接打开 Coze 官方聊天窗，可以单独接 Chat SDK。
 
+### 小虎实时语音
+
+项目已安装 `@coze/realtime-api`，前端提供“小虎实时语音”按钮，目标是使用 Coze 原生实时语音与音色，而不是浏览器 `speechSynthesis`。
+
+本地 `.env` 需要：
+
+```bash
+VITE_COZE_REALTIME_TOKEN=你的实时语音访问令牌
+VITE_COZE_REALTIME_BOT_ID=7645562795198742562
+VITE_COZE_REALTIME_CONNECTOR_ID=实时语音渠道 ID
+```
+
+其中 `connectorId` 是 SDK 必填项。若不填，页面会提示缺少实时语音配置。Demo 中 token 会进入浏览器端，仅适合本地验证；正式产品应由后端临时签发。
+
 ## Agent World
 
 每个本地 agent 都预留了 Agent World 身份字段：

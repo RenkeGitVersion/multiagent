@@ -181,6 +181,14 @@ button.recording {
   background: #b94040;
 }
 
+button.realtime {
+  background: #5146c6;
+}
+
+button.realtime.active {
+  background: #7a3e9d;
+}
+
 button.terminate {
   background: #2d3748;
 }

@@ -4,6 +4,9 @@ import type { AgentConfig, ChatMessage, ConverseResponse, Gender, RouteOutput, T
 import "./styles.css";
 
 const apiBase = import.meta.env.VITE_API_BASE ?? "http://localhost:8787";
+const realtimeToken = import.meta.env.VITE_COZE_REALTIME_TOKEN;
+const realtimeBotId = import.meta.env.VITE_COZE_REALTIME_BOT_ID;
+const realtimeConnectorId = import.meta.env.VITE_COZE_REALTIME_CONNECTOR_ID;
 
 function App() {
   const [agents, setAgents] = useState<AgentConfig[]>([]);
@@ -15,6 +18,7 @@ function App() {
   const [isListening, setIsListening] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [isProfiling, setIsProfiling] = useState(false);
+  const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
   const [voiceProfile, setVoiceProfile] = useState<VoiceProfileResult | null>(null);
   const [routeResult, setRouteResult] = useState<(RouteOutput & { agentName: string }) | null>(null);
   const [status, setStatus] = useState("准备就绪");
@@ -27,6 +31,7 @@ function App() {
   const autoSendRef = useRef(false);
   const audioReadyResolverRef = useRef<((audio: Blob | null) => void) | null>(null);
   const requestAbortRef = useRef<AbortController | null>(null);
+  const realtimeClientRef = useRef<{ connect(): Promise<void>; disconnect(): Promise<void>; on(eventName: string, callback: (eventName: string, event: unknown) => void): unknown } | null>(null);
 
   const websocketUrl = useMemo(() => apiBase.replace(/^http/, "ws") + "/api/events", []);
 
@@ -301,6 +306,65 @@ function App() {
     window.speechSynthesis.speak(utterance);
   }
 
+  async function toggleRealtimeVoice() {
+    if (isRealtimeConnected) {
+      await realtimeClientRef.current?.disconnect();
+      realtimeClientRef.current = null;
+      setIsRealtimeConnected(false);
+      setStatus("小虎实时语音已断开");
+      return;
+    }
+
+    if (!realtimeToken || !realtimeBotId || !realtimeConnectorId) {
+      setStatus("缺少实时语音配置：请填写 VITE_COZE_REALTIME_TOKEN / BOT_ID / CONNECTOR_ID");
+      return;
+    }
+
+    const { EventNames, RealtimeClient, RealtimeUtils } = await import("@coze/realtime-api");
+    const permission = await RealtimeUtils.checkDevicePermission();
+    if (!permission.audio) {
+      setStatus("需要麦克风权限才能启动小虎实时语音");
+      return;
+    }
+
+    const client = new RealtimeClient({
+      baseURL: "https://api.coze.cn",
+      accessToken: realtimeToken,
+      botId: realtimeBotId,
+      connectorId: realtimeConnectorId,
+      allowPersonalAccessTokenInBrowser: true,
+      audioMutedDefault: false,
+      debug: true,
+      isAutoSubscribeAudio: true
+    });
+    client.on(EventNames.CONNECTED, () => {
+      setIsRealtimeConnected(true);
+      setStatus("小虎实时语音已连接，可以直接说话");
+    });
+    client.on(EventNames.DISCONNECTED, () => {
+      setIsRealtimeConnected(false);
+      setStatus("小虎实时语音已断开");
+    });
+    client.on(EventNames.CONVERSATION_AUDIO_TRANSCRIPT_DELTA, (_eventName, event) => {
+      const text = typeof event === "object" && event && "content" in event ? String((event as { content?: string }).content ?? "") : "";
+      if (text) setTranscript(text);
+    });
+    client.on(EventNames.CONVERSATION_MESSAGE_COMPLETED, (_eventName, event) => {
+      const text = typeof event === "object" && event && "content" in event ? String((event as { content?: string }).content ?? "") : "";
+      if (text) appendMessage("assistant", text, currentAgent?.id);
+    });
+    client.on(EventNames.ERROR, (_eventName, event) => {
+      setStatus(`小虎实时语音错误：${JSON.stringify(event)}`);
+    });
+    client.on(EventNames.SERVER_ERROR, (_eventName, event) => {
+      setStatus(`Coze 实时语音服务错误：${JSON.stringify(event)}`);
+    });
+
+    realtimeClientRef.current = client;
+    setStatus("正在连接小虎实时语音");
+    await client.connect();
+  }
+
   return (
     <main className="app-shell">
       <section className="stage">
@@ -350,6 +414,9 @@ function App() {
         </div>
 
         <div className="voice-panel">
+          <button className={isRealtimeConnected ? "realtime active" : "realtime"} onClick={toggleRealtimeVoice}>
+            {isRealtimeConnected ? "结束小虎实时语音" : "开始小虎实时语音"}
+          </button>
           <button className={isListening ? "recording" : ""} onClick={toggleListening}>
             {isListening ? "正在听，停顿后自动发送" : "开始录音"}
           </button>
