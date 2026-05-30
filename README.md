@@ -19,11 +19,34 @@ npm run dev
 接入真实扣子智能体时：
 
 1. 在 `.env` 填入 `COZE_API_TOKEN`。
-2. 在 `server/agents.ts` 替换每个 `cozeBotId`。
+2. 在 `server/agents.config.json` 替换每个 `cozeBotId` 和可选的 `cozeVoiceId`。
 3. 将 `COZE_USE_MOCK=false`。
-4. 在 `server/cozeAdapter.ts` 内按账号实际开通的实时语音 API 补齐请求实现。
+4. 当前真实模式会优先调用 Coze `/v3/chat` 文本接口；实时语音输出仍需按你的 Coze 账号语音 API 权限继续补齐。
 
 API token 只在后端读取，前端不会暴露。
+
+## Agent World
+
+每个本地 agent 都预留了 Agent World 身份字段：
+
+- `agentWorldUsername`
+- `agentWorldApiKey`
+- `agentWorldProfileUrl`
+
+注册或查询：
+
+```bash
+npx tsx tools/agent_world.ts register little-fox
+npx tsx tools/agent_world.ts profile little-fox
+```
+
+注册会返回 `api_key`、`verification_code` 和挑战题。解出挑战题后激活：
+
+```bash
+npx tsx tools/agent_world.ts verify <verification_code> <answer>
+```
+
+激活成功后，把返回的 `api_key` 填入 `server/agents.config.json` 对应 agent 的 `agentWorldApiKey`。挑战题 5 分钟过期，最多 5 次尝试。
 
 ## 意图路由
 

@@ -14,10 +14,45 @@ export class CozeAdapter {
       return this.generateMockReply(input);
     }
 
-    return [
-      `已选择 ${input.agent.displayName}。`,
-      "真实 Coze 实时语音 API 需要按当前账号开通能力补齐事件流接入；当前后端已保证 token 不会暴露到前端。"
-    ].join("");
+    const reply = await this.generateCozeReply(input);
+    return reply ?? this.generateMockReply(input);
+  }
+
+  private async generateCozeReply(input: GenerateReplyInput): Promise<string | undefined> {
+    if (input.agent.cozeBotId.startsWith("replace_with_")) return undefined;
+
+    const apiBase = process.env.COZE_API_BASE ?? "https://api.coze.cn";
+    const response = await fetch(`${apiBase.replace(/\/$/, "")}/v3/chat`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.COZE_API_TOKEN}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        bot_id: input.agent.cozeBotId,
+        user_id: process.env.COZE_USER_ID ?? "multi-agent-demo-user",
+        stream: false,
+        auto_save_history: true,
+        additional_messages: [
+          {
+            role: "user",
+            content: input.queryText,
+            content_type: "text"
+          }
+        ]
+      })
+    });
+
+    if (!response.ok) return undefined;
+    const payload = await response.json() as {
+      data?: {
+        messages?: Array<{ type?: string; content?: string }>;
+      };
+      messages?: Array<{ type?: string; content?: string }>;
+    };
+    const messages = payload.data?.messages ?? payload.messages ?? [];
+    return messages.find((message) => message.type === "answer" && message.content)?.content
+      ?? messages.find((message) => message.content)?.content;
   }
 
   private generateMockReply(input: GenerateReplyInput): string {

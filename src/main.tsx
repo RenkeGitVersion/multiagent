@@ -389,7 +389,10 @@ function App() {
               onClick={() => setCurrentAgent(agent)}
             >
               <img src={agent.gifPath} alt="" />
-              <span>{agent.displayName}</span>
+              <span>
+                <strong>{agent.displayName}</strong>
+                <small>{agent.cozeBotId.startsWith("replace_with_") ? "Coze 未配置" : "Coze 已配置"} · {agent.agentWorldApiKey ? "Agent World 已激活" : "Agent World 待激活"}</small>
+              </span>
             </button>
           ))}
         </div>

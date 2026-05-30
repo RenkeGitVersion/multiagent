@@ -20,6 +20,11 @@ export interface VoiceProfileResult extends UserProfile {
 export interface AgentConfig {
   id: string;
   cozeBotId: string;
+  cozeVoiceId?: string;
+  cozeConversationId?: string;
+  agentWorldUsername?: string;
+  agentWorldApiKey?: string;
+  agentWorldProfileUrl?: string;
   displayName: string;
   aliases: string[];
   personaTags: string[];

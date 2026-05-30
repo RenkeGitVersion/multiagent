@@ -271,6 +271,16 @@ h2 {
   background: #e7f1ee;
 }
 
+.agent-list button span {
+  display: grid;
+  gap: 3px;
+}
+
+.agent-list button small {
+  color: #6e7774;
+  font-size: 12px;
+}
+
 .agent-list img {
   width: 36px;
   height: 36px;
