@@ -7,6 +7,7 @@ interface SpeechRecognitionAlternative {
 interface SpeechRecognitionResult {
   readonly 0: SpeechRecognitionAlternative;
   readonly length: number;
+  readonly isFinal: boolean;
 }
 
 interface SpeechRecognitionResultList {

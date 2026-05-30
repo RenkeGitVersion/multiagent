@@ -2,17 +2,17 @@
   {
     "id": "little-fox",
     "cozeBotId": "7645562795198742562",
-    "cozeVoiceId": "replace_with_little_fox_voice_id",
+    "cozeVoiceId": "7468512265134882867",
     "agentWorldUsername": "little-tiger-companion",
     "agentWorldApiKey": "",
-    "displayName": "小虎",
-    "aliases": ["小虎", "虎虎", "小老虎", "儿童陪伴", "陪小朋友"],
+    "displayName": "虎子",
+    "aliases": ["虎子", "小虎", "虎虎", "小老虎", "儿童陪伴", "陪小朋友"],
     "personaTags": ["活泼", "温和", "语音互动", "儿童陪伴"],
     "targetAgeGroups": ["child", "teen"],
     "targetGenders": ["unknown", "female", "male"],
     "serviceScenes": ["故事", "睡前", "闲聊", "作业提醒", "儿童陪伴"],
     "gifPath": "/gifs/little-fox.svg",
-    "defaultPromptHint": "用活泼、温和、适合儿童理解的方式进行语音陪伴互动。",
+    "defaultPromptHint": "你是虎子，用活泼、温和、适合儿童理解的方式进行语音陪伴互动。",
     "priority": 100
   },
   {

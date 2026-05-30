@@ -13,6 +13,16 @@ export async function routeAgent(input: RouteInput): Promise<RouteOutput> {
   const strong = routeStrongIntent(input.queryText.trim());
   if (strong) return strong;
 
+  if (input.lockedAgentId && agents.some((agent) => agent.id === input.lockedAgentId)) {
+    return {
+      agentId: input.lockedAgentId,
+      intentStrength: "weak",
+      reason: "10 秒内连续对话，保持当前智能体",
+      confidence: 0.94,
+      source: "session-lock"
+    };
+  }
+
   const modelRoute = await routeWithModel(input);
   if (modelRoute) return modelRoute;
 
@@ -23,6 +33,16 @@ export function routeAgentByRules(input: RouteInput): RouteOutput {
   const query = input.queryText.trim();
   const strong = routeStrongIntent(query);
   if (strong) return strong;
+
+  if (input.lockedAgentId && agents.some((agent) => agent.id === input.lockedAgentId)) {
+    return {
+      agentId: input.lockedAgentId,
+      intentStrength: "weak",
+      reason: "10 秒内连续对话，保持当前智能体",
+      confidence: 0.94,
+      source: "session-lock"
+    };
+  }
 
   const domain = matchDomainIntent(query);
   if (domain) {

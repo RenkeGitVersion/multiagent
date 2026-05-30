@@ -39,6 +39,7 @@ export interface AgentConfig {
 export interface RouteInput {
   queryText: string;
   currentAgentId?: string;
+  lockedAgentId?: string;
   profile: UserProfile;
   conversationContext: ChatMessage[];
 }
@@ -48,7 +49,7 @@ export interface RouteOutput {
   intentStrength: IntentStrength;
   reason: string;
   confidence: number;
-  source: "strong-rule" | "model" | "rule-fallback";
+  source: "strong-rule" | "model" | "rule-fallback" | "session-lock";
 }
 
 export interface ChatMessage {
@@ -72,6 +73,8 @@ export interface ReminderTask {
 export interface ConverseRequest {
   queryText: string;
   currentAgentId?: string;
+  lockedAgentId?: string;
+  clientSessionId?: string;
   profile: UserProfile;
   conversationContext: ChatMessage[];
 }

@@ -21,7 +21,7 @@ npm run dev
 1. 在 `.env` 填入 `COZE_API_TOKEN`。
 2. 在 `server/agents.config.json` 替换每个 `cozeBotId` 和可选的 `cozeVoiceId`。
 3. 将 `COZE_USE_MOCK=false`。
-4. 当前真实模式会调用 Coze `/v3/chat` 创建会话，并轮询 `/v3/chat/retrieve` 与 `/v3/chat/message/list` 获取回复；实时语音输出仍需按你的 Coze 账号语音 API 权限继续补齐。
+4. 当前真实模式会调用 Coze `/v3/chat` 创建会话，并轮询 `/v3/chat/retrieve` 与 `/v3/chat/message/list` 获取回复；如果 agent 配置了 `cozeVoiceId`，前端会自动播放 Coze `/v1/audio/speech` 生成的原生音色语音。
 
 API token 只在后端读取，前端不会暴露。
 
@@ -32,23 +32,26 @@ COZE_USE_MOCK=false
 COZE_USE_CLI_TOKEN=true
 ```
 
-`COZE_USE_CLI_TOKEN=true` 时会读取 `coze auth login --oauth` 保存的 CLI OAuth token。实测你自己的“小虎”智能体 `7645562795198742562` 可通过 OpenAPI 调用；API 管理页里的 `cztei_...` token 在当前 `/v3/chat` Bearer 调用下返回 4101，可能属于 Playground/Chat SDK 渠道令牌，不等同于 OpenAPI OAuth token。公开英语学习智能体 `7374811613293150208` 返回资源不存在/未授权，不能直接作为 API bot 使用，需要换成你自己空间里已发布到 Agent as API 的英语学习 bot。
+`COZE_USE_CLI_TOKEN=true` 时会读取 `coze auth login --oauth` 保存的 CLI OAuth token。实测你自己的“虎子”智能体 `7645562795198742562` 可通过 OpenAPI 调用；API 管理页里的 `cztei_...` token 在当前 `/v3/chat` Bearer 调用下返回 4101，可能属于 Playground/Chat SDK 渠道令牌，不等同于 OpenAPI OAuth token。公开英语学习智能体 `7374811613293150208` 返回资源不存在/未授权，不能直接作为 API bot 使用，需要换成你自己空间里已发布到 Agent as API 的英语学习 bot。
 
 Coze Chat SDK 适合直接在网页中嵌入官方聊天窗，配置项包括 `type=bot`、`bot_id` 和 `isIframe` 等；当前 demo 是自定义多智能体路由 UI，因此默认使用后端 OpenAPI 获取回复。如果希望某个 agent 点击后直接打开 Coze 官方聊天窗，可以单独接 Chat SDK。
 
-### 小虎实时语音
+### Coze 原生音色播放
 
-项目已安装 `@coze/realtime-api`，前端提供“小虎实时语音”按钮，目标是使用 Coze 原生实时语音与音色，而不是浏览器 `speechSynthesis`。
+回复生成后，前端会自动请求后端 `/api/speech`，由后端调用 Coze `/v1/audio/speech` 按当前 agent 的 `cozeVoiceId` 合成 mp3 并播放。Coze 音频不可用时才回退到浏览器 `speechSynthesis`。
 
 本地 `.env` 需要：
 
 ```bash
-VITE_COZE_REALTIME_TOKEN=你的实时语音访问令牌
-VITE_COZE_REALTIME_BOT_ID=7645562795198742562
-VITE_COZE_REALTIME_CONNECTOR_ID=实时语音渠道 ID
+COZE_USE_MOCK=false
+COZE_USE_CLI_TOKEN=true
 ```
 
-其中 `connectorId` 是 SDK 必填项。若不填，页面会提示缺少实时语音配置。Demo 中 token 会进入浏览器端，仅适合本地验证；正式产品应由后端临时签发。
+虎子当前配置的音色是“佩奇猪”，voice ID 是 `7468512265134882867`。API token 只在后端读取，前端不会暴露。
+
+## 会话保持
+
+用户与某个 agent 完成一轮对话后，10 秒内继续输入会保持由当前 agent 回复，并跳过声音画像和弱意图路由；如果用户明确说出另一个 agent 的名称或唤醒词，强意图会立即切换到对应 agent。
 
 ## Agent World
 

@@ -4,9 +4,14 @@ import type { AgentConfig, ChatMessage, ConverseResponse, Gender, RouteOutput, T
 import "./styles.css";
 
 const apiBase = import.meta.env.VITE_API_BASE ?? "http://localhost:8787";
-const realtimeToken = import.meta.env.VITE_COZE_REALTIME_TOKEN;
-const realtimeBotId = import.meta.env.VITE_COZE_REALTIME_BOT_ID;
-const realtimeConnectorId = import.meta.env.VITE_COZE_REALTIME_CONNECTOR_ID;
+const agentHoldMs = 10_000;
+const clientSessionStorageKey = "multi-agent-demo-client-session-id";
+
+type SessionHold = {
+  agentId: string;
+  agentName: string;
+  endsAt: number;
+};
 
 function App() {
   const [agents, setAgents] = useState<AgentConfig[]>([]);
@@ -16,9 +21,9 @@ function App() {
   const [draft, setDraft] = useState("");
   const [transcript, setTranscript] = useState("");
   const [isListening, setIsListening] = useState(false);
+  const [isConversationActive, setIsConversationActive] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [isProfiling, setIsProfiling] = useState(false);
-  const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
   const [voiceProfile, setVoiceProfile] = useState<VoiceProfileResult | null>(null);
   const [routeResult, setRouteResult] = useState<(RouteOutput & { agentName: string }) | null>(null);
   const [status, setStatus] = useState("准备就绪");
@@ -28,10 +33,22 @@ function App() {
   const audioChunksRef = useRef<Blob[]>([]);
   const latestAudioRef = useRef<Blob | null>(null);
   const latestTranscriptRef = useRef("");
+  const finalTranscriptRef = useRef("");
   const autoSendRef = useRef(false);
+  const conversationActiveRef = useRef(false);
+  const isSendingRef = useRef(false);
+  const isPlayingRef = useRef(false);
+  const listeningSuppressedRef = useRef(false);
+  const lastAssistantTextRef = useRef("");
+  const lastAssistantAudioEndedAtRef = useRef(0);
+  const restartListenTimerRef = useRef<number | null>(null);
   const audioReadyResolverRef = useRef<((audio: Blob | null) => void) | null>(null);
   const requestAbortRef = useRef<AbortController | null>(null);
-  const realtimeClientRef = useRef<{ connect(): Promise<void>; disconnect(): Promise<void>; on(eventName: string, callback: (eventName: string, event: unknown) => void): unknown } | null>(null);
+  const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
+  const sessionHoldRef = useRef<SessionHold | null>(null);
+  const clientSessionIdRef = useRef(getClientSessionId());
+  const [sessionHold, setSessionHold] = useState<SessionHold | null>(null);
+  const [holdRemainingSeconds, setHoldRemainingSeconds] = useState(0);
 
   const websocketUrl = useMemo(() => apiBase.replace(/^http/, "ws") + "/api/events", []);
 
@@ -52,11 +69,33 @@ function App() {
       if (!isTaskFiredEvent(payload)) return;
       setCurrentAgent(payload.agent);
       appendMessage("assistant", payload.assistantText, payload.agent.id);
-      speak(payload.assistantText);
+      playAgentSpeech(payload.assistantText, payload.agent.id, payload.agent.displayName);
       setStatus(`任务已触发：提醒 ${payload.task.audience}`);
     };
     return () => ws.close();
   }, [websocketUrl]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const hold = sessionHoldRef.current;
+      if (!hold) {
+        setHoldRemainingSeconds(0);
+        return;
+      }
+
+      const remainingMs = hold.endsAt - Date.now();
+      if (remainingMs <= 0) {
+        sessionHoldRef.current = null;
+        setSessionHold(null);
+        setHoldRemainingSeconds(0);
+        return;
+      }
+
+      setHoldRemainingSeconds(Math.ceil(remainingMs / 1000));
+    }, 250);
+
+    return () => window.clearInterval(timer);
+  }, []);
 
   function appendMessage(role: ChatMessage["role"], text: string, agentId?: string) {
     setMessages((items) => [
@@ -71,15 +110,43 @@ function App() {
     ]);
   }
 
-  async function toggleListening() {
-    if (isListening) {
-      autoSendRef.current = true;
-      recognitionRef.current?.stop();
-      stopAudioCapture();
-      setIsListening(false);
+  function toggleConversation() {
+    if (conversationActiveRef.current) {
+      stopConversation();
       return;
     }
+    conversationActiveRef.current = true;
+    setIsConversationActive(true);
+    void startListeningTurn();
+  }
 
+  function stopConversation() {
+    conversationActiveRef.current = false;
+    setIsConversationActive(false);
+    if (restartListenTimerRef.current) {
+      window.clearTimeout(restartListenTimerRef.current);
+      restartListenTimerRef.current = null;
+    }
+    recognitionRef.current?.stop();
+    recognitionRef.current = null;
+    stopAudioCapture();
+    setIsListening(false);
+    setStatus("对话已停止");
+  }
+
+  function scheduleListening(delayMs = 350) {
+    if (!conversationActiveRef.current) return;
+    if (restartListenTimerRef.current) window.clearTimeout(restartListenTimerRef.current);
+    restartListenTimerRef.current = window.setTimeout(() => {
+      restartListenTimerRef.current = null;
+      if (conversationActiveRef.current && !isSendingRef.current && !isPlayingRef.current && !listeningSuppressedRef.current && !recognitionRef.current) {
+        void startListeningTurn();
+      }
+    }, delayMs);
+  }
+
+  async function startListeningTurn() {
+    if (!conversationActiveRef.current || recognitionRef.current || isSendingRef.current) return;
     const Recognition = window.SpeechRecognition ?? window.webkitSpeechRecognition;
     if (!Recognition) {
       setStatus("当前浏览器不支持语音识别，请使用文本输入兜底");
@@ -95,6 +162,7 @@ function App() {
     recognition.onstart = () => {
       setTranscript("");
       latestTranscriptRef.current = "";
+      finalTranscriptRef.current = "";
       setIsListening(true);
       setStatus("正在听你说话");
     };
@@ -102,47 +170,81 @@ function App() {
       const text = Array.from({ length: event.results.length }, (_, index) => event.results[index])
         .map((result: SpeechRecognitionResult) => result[0]?.transcript ?? "")
         .join("");
+      const finalText = Array.from({ length: event.results.length }, (_, index) => event.results[index])
+        .filter((result: SpeechRecognitionResult) => result.isFinal)
+        .map((result: SpeechRecognitionResult) => result[0]?.transcript ?? "")
+        .join("");
       setTranscript(text);
       setDraft(text);
       latestTranscriptRef.current = text;
+      if (finalText.trim()) finalTranscriptRef.current = finalText;
     };
     recognition.onerror = () => {
       setStatus("语音识别失败，请检查麦克风权限或改用文本输入");
       setIsListening(false);
+      recognitionRef.current = null;
+      scheduleListening(600);
     };
     recognition.onend = () => {
       setIsListening(false);
+      recognitionRef.current = null;
       stopAudioCapture();
-      const finalText = latestTranscriptRef.current.trim();
+      const finalText = (finalTranscriptRef.current || latestTranscriptRef.current).trim();
+      if (listeningSuppressedRef.current) {
+        autoSendRef.current = false;
+        setStatus("AI 回复播放中，暂停监听");
+        return;
+      }
+      if (isLikelyAssistantEcho(finalText)) {
+        autoSendRef.current = false;
+        setDraft("");
+        setTranscript("");
+        latestTranscriptRef.current = "";
+        finalTranscriptRef.current = "";
+        setStatus("已忽略扬声器回声，继续监听");
+        scheduleListening(700);
+        return;
+      }
       if (autoSendRef.current && finalText) {
         setStatus("语音识别完成，正在自动发送");
         autoSendRef.current = false;
         void sendMessage(finalText);
       } else {
         autoSendRef.current = false;
-        setStatus(finalText ? "语音识别完成" : "没有识别到文字，请重试");
+        setStatus(finalText ? "语音识别完成" : "持续监听中");
+        scheduleListening(300);
       }
     };
     recognitionRef.current = recognition;
-    recognition.start();
+    try {
+      recognition.start();
+    } catch {
+      recognitionRef.current = null;
+      setIsListening(false);
+      scheduleListening(600);
+    }
   }
 
   async function sendMessage(textOverride?: string) {
     const queryText = (textOverride ?? draft).trim();
     if (!queryText) return;
-    appendMessage("user", queryText, currentAgent?.id);
+    const localStrongAgent = matchLocalStrongIntent(queryText);
+    const lockedAgentId = getLockedAgentId(Boolean(localStrongAgent));
+    appendMessage("user", queryText, lockedAgentId ?? currentAgent?.id);
     setDraft("");
     setTranscript("");
     setIsSending(true);
-    setStatus("正在判断意图");
+    isSendingRef.current = true;
+    clearSessionHold();
+    setStatus(lockedAgentId ? `继续由 ${agentNameById(lockedAgentId)} 回答` : "正在准备回复");
 
     try {
       requestAbortRef.current?.abort();
       const abortController = new AbortController();
       requestAbortRef.current = abortController;
-      const strongRoute = await detectStrongIntent(queryText, abortController.signal);
-      const routedProfile = strongRoute ? skipVoiceProfile() : await resolveVoiceProfile(abortController.signal);
-      setStatus("正在路由智能体");
+      const hasStrongRoute = Boolean(localStrongAgent);
+      const routedProfile = hasStrongRoute || lockedAgentId ? skipVoiceProfile(lockedAgentId ? "session-lock" : "strong") : await resolveVoiceProfile(abortController.signal);
+      setStatus(lockedAgentId ? `继续由 ${agentNameById(lockedAgentId)} 回答` : "正在路由智能体");
       const response = await fetch(`${apiBase}/api/converse`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -150,15 +252,23 @@ function App() {
         body: JSON.stringify({
           queryText,
           currentAgentId: currentAgent?.id,
+          lockedAgentId,
+          clientSessionId: clientSessionIdRef.current,
           profile: routedProfile,
           conversationContext: messages
         })
       });
       const data = (await response.json()) as ConverseResponse;
       setCurrentAgent(data.agent);
-      setRouteResult({ ...data.route, agentName: data.agent.displayName });
+      setRouteResult(lockedAgentId ? null : { ...data.route, agentName: data.agent.displayName });
       appendMessage("assistant", data.assistantText, data.agent.id);
-      speak(data.assistantText);
+      setStatus(`${data.agent.displayName} 已生成回复，正在合成语音`);
+      if (conversationActiveRef.current) {
+        recognitionRef.current?.stop();
+        recognitionRef.current = null;
+        setIsListening(false);
+      }
+      void playAgentSpeech(data.assistantText, data.agent.id, data.agent.displayName);
       setStatus(
         data.task
           ? `已安排提醒：${new Date(data.task.triggerAt).toLocaleTimeString()}`
@@ -168,11 +278,54 @@ function App() {
       setStatus(error instanceof DOMException && error.name === "AbortError" ? "已手动终止" : "后端请求失败，请确认服务已启动");
     } finally {
       setIsSending(false);
+      isSendingRef.current = false;
       requestAbortRef.current = null;
     }
   }
 
+  function getLockedAgentId(hasStrongRoute: boolean): string | undefined {
+    if (hasStrongRoute) return undefined;
+    const hold = sessionHoldRef.current;
+    if (!hold || Date.now() > hold.endsAt) return undefined;
+    return hold.agentId;
+  }
+
+  function clearSessionHold() {
+    sessionHoldRef.current = null;
+    setSessionHold(null);
+    setHoldRemainingSeconds(0);
+  }
+
+  function agentNameById(agentId: string) {
+    return agents.find((agent) => agent.id === agentId)?.displayName ?? "当前智能体";
+  }
+
+  function startSessionHold(agentId: string | undefined, agentName: string) {
+    if (!agentId) return;
+    const hold = {
+      agentId,
+      agentName,
+      endsAt: Date.now() + agentHoldMs
+    };
+    sessionHoldRef.current = hold;
+    setSessionHold(hold);
+    setHoldRemainingSeconds(Math.ceil(agentHoldMs / 1000));
+    setStatus(`语音播放完成，${Math.ceil(agentHoldMs / 1000)} 秒内继续由 ${agentName} 回答`);
+  }
+
+  function matchLocalStrongIntent(queryText: string): AgentConfig | undefined {
+    return agents.find((agent) =>
+      [agent.displayName, ...agent.aliases].some((alias) => alias && queryText.includes(alias))
+    );
+  }
+
   function terminateInteraction() {
+    conversationActiveRef.current = false;
+    setIsConversationActive(false);
+    if (restartListenTimerRef.current) {
+      window.clearTimeout(restartListenTimerRef.current);
+      restartListenTimerRef.current = null;
+    }
     recognitionRef.current?.stop();
     recognitionRef.current = null;
     mediaRecorderRef.current?.stop();
@@ -181,6 +334,8 @@ function App() {
     mediaStreamRef.current = null;
     requestAbortRef.current?.abort();
     requestAbortRef.current = null;
+    listeningSuppressedRef.current = false;
+    stopCurrentAudio();
     if ("speechSynthesis" in window) {
       window.speechSynthesis.cancel();
     }
@@ -191,6 +346,39 @@ function App() {
     setTranscript("");
     setDraft("");
     setStatus("已手动终止");
+  }
+
+  function stopCurrentAudio() {
+    audioPlayerRef.current?.pause();
+    audioPlayerRef.current = null;
+    if ("speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
+    isPlayingRef.current = false;
+  }
+
+  function pauseListeningForPlayback() {
+    listeningSuppressedRef.current = true;
+    if (restartListenTimerRef.current) {
+      window.clearTimeout(restartListenTimerRef.current);
+      restartListenTimerRef.current = null;
+    }
+    recognitionRef.current?.stop();
+    recognitionRef.current = null;
+    stopAudioCapture();
+    setIsListening(false);
+  }
+
+  function normalizeSpeechText(text: string) {
+    return text.replace(/[^\p{Script=Han}a-zA-Z0-9]/gu, "").toLowerCase();
+  }
+
+  function isLikelyAssistantEcho(text: string) {
+    const normalized = normalizeSpeechText(text);
+    const assistant = normalizeSpeechText(lastAssistantTextRef.current);
+    if (!normalized || !assistant) return false;
+    if (Date.now() - lastAssistantAudioEndedAtRef.current > 5000) return false;
+    return assistant.includes(normalized) || normalized.includes(assistant.slice(0, Math.min(assistant.length, 30)));
   }
 
   async function startAudioCapture() {
@@ -243,25 +431,15 @@ function App() {
     });
   }
 
-  async function detectStrongIntent(queryText: string, signal: AbortSignal): Promise<boolean> {
-    const response = await fetch(`${apiBase}/api/route/strong`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      signal,
-      body: JSON.stringify({ queryText })
-    });
-    const result = await response.json() as { route: RouteOutput | null };
-    return result.route?.intentStrength === "strong";
-  }
-
-  function skipVoiceProfile(): UserProfile {
+  function skipVoiceProfile(reason: "strong" | "session-lock" = "strong"): UserProfile {
     setVoiceProfile({
       ...profile,
       ageYears: 0,
       genderConfidence: 0,
       inferenceSeconds: 0,
       totalSeconds: 0,
-      source: "skipped"
+      source: "skipped",
+      error: reason === "session-lock" ? "10 秒内连续对话，跳过声音画像" : "强意图已明确，跳过声音画像"
     });
     return profile;
   }
@@ -297,72 +475,69 @@ function App() {
     }
   }
 
-  function speak(text: string) {
+  async function playAgentSpeech(text: string, agentId?: string, agentName = currentAgent?.displayName ?? "当前智能体") {
+    lastAssistantTextRef.current = text;
+    pauseListeningForPlayback();
+    try {
+      const response = await fetch(`${apiBase}/api/speech`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ text, agentId })
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({ error: "Coze 原生音色不可用" })) as { error?: string };
+        setStatus(`语音播放回退：${payload.error ?? "Coze 原生音色不可用"}`);
+        throw new Error("Coze speech unavailable");
+      }
+      const audio = await response.blob();
+      stopCurrentAudio();
+      const audioUrl = URL.createObjectURL(audio);
+      const player = new Audio(audioUrl);
+      audioPlayerRef.current = player;
+      player.onended = () => {
+        isPlayingRef.current = false;
+        listeningSuppressedRef.current = false;
+        lastAssistantAudioEndedAtRef.current = Date.now();
+        startSessionHold(agentId, agentName);
+        URL.revokeObjectURL(audioUrl);
+        scheduleListening(900);
+      };
+      player.onerror = () => {
+        isPlayingRef.current = false;
+        listeningSuppressedRef.current = false;
+        URL.revokeObjectURL(audioUrl);
+        scheduleListening(900);
+      };
+      isPlayingRef.current = true;
+      await player.play();
+      return;
+    } catch {
+      speakWithBrowser(text, agentName);
+    }
+  }
+
+  function speakWithBrowser(text: string, agentName = currentAgent?.displayName ?? "当前智能体") {
     if (!("speechSynthesis" in window)) return;
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = "zh-CN";
     utterance.rate = 1;
+    utterance.onend = () => {
+      isPlayingRef.current = false;
+      listeningSuppressedRef.current = false;
+      lastAssistantAudioEndedAtRef.current = Date.now();
+      startSessionHold(currentAgent?.id, agentName);
+      scheduleListening(900);
+    };
+    utterance.onerror = () => {
+      isPlayingRef.current = false;
+      listeningSuppressedRef.current = false;
+      scheduleListening(900);
+    };
+    isPlayingRef.current = true;
     window.speechSynthesis.speak(utterance);
-  }
-
-  async function toggleRealtimeVoice() {
-    if (isRealtimeConnected) {
-      await realtimeClientRef.current?.disconnect();
-      realtimeClientRef.current = null;
-      setIsRealtimeConnected(false);
-      setStatus("小虎实时语音已断开");
-      return;
-    }
-
-    if (!realtimeToken || !realtimeBotId || !realtimeConnectorId) {
-      setStatus("缺少实时语音配置：请填写 VITE_COZE_REALTIME_TOKEN / BOT_ID / CONNECTOR_ID");
-      return;
-    }
-
-    const { EventNames, RealtimeClient, RealtimeUtils } = await import("@coze/realtime-api");
-    const permission = await RealtimeUtils.checkDevicePermission();
-    if (!permission.audio) {
-      setStatus("需要麦克风权限才能启动小虎实时语音");
-      return;
-    }
-
-    const client = new RealtimeClient({
-      baseURL: "https://api.coze.cn",
-      accessToken: realtimeToken,
-      botId: realtimeBotId,
-      connectorId: realtimeConnectorId,
-      allowPersonalAccessTokenInBrowser: true,
-      audioMutedDefault: false,
-      debug: true,
-      isAutoSubscribeAudio: true
-    });
-    client.on(EventNames.CONNECTED, () => {
-      setIsRealtimeConnected(true);
-      setStatus("小虎实时语音已连接，可以直接说话");
-    });
-    client.on(EventNames.DISCONNECTED, () => {
-      setIsRealtimeConnected(false);
-      setStatus("小虎实时语音已断开");
-    });
-    client.on(EventNames.CONVERSATION_AUDIO_TRANSCRIPT_DELTA, (_eventName, event) => {
-      const text = typeof event === "object" && event && "content" in event ? String((event as { content?: string }).content ?? "") : "";
-      if (text) setTranscript(text);
-    });
-    client.on(EventNames.CONVERSATION_MESSAGE_COMPLETED, (_eventName, event) => {
-      const text = typeof event === "object" && event && "content" in event ? String((event as { content?: string }).content ?? "") : "";
-      if (text) appendMessage("assistant", text, currentAgent?.id);
-    });
-    client.on(EventNames.ERROR, (_eventName, event) => {
-      setStatus(`小虎实时语音错误：${JSON.stringify(event)}`);
-    });
-    client.on(EventNames.SERVER_ERROR, (_eventName, event) => {
-      setStatus(`Coze 实时语音服务错误：${JSON.stringify(event)}`);
-    });
-
-    realtimeClientRef.current = client;
-    setStatus("正在连接小虎实时语音");
-    await client.connect();
   }
 
   return (
@@ -410,15 +585,14 @@ function App() {
 
         <div className={routeResult ? "route-result detected" : "route-result"}>
           <span>路由判断</span>
-          {renderRouteResult(routeResult)}
+          {sessionHold && holdRemainingSeconds > 0
+            ? <strong>会话保持中：{holdRemainingSeconds} 秒内继续由 {sessionHold.agentName} 回答</strong>
+            : renderRouteResult(routeResult)}
         </div>
 
         <div className="voice-panel">
-          <button className={isRealtimeConnected ? "realtime active" : "realtime"} onClick={toggleRealtimeVoice}>
-            {isRealtimeConnected ? "结束小虎实时语音" : "开始小虎实时语音"}
-          </button>
-          <button className={isListening ? "recording" : ""} onClick={toggleListening}>
-            {isListening ? "正在听，停顿后自动发送" : "开始录音"}
+          <button className={isConversationActive ? "recording" : ""} onClick={toggleConversation}>
+            {isConversationActive ? (isListening ? "监听中，点按停止" : "对话中，点按停止") : "开始"}
           </button>
           <input
             value={draft}
@@ -477,7 +651,7 @@ function isTaskFiredEvent(payload: TaskFiredEvent | { type: string }): payload i
 function renderVoiceProfile(result: VoiceProfileResult | null) {
   if (!result) return <strong>未识别，使用手动画像</strong>;
   if (result.source === "manual") return <strong>无录音，使用手动画像</strong>;
-  if (result.source === "skipped") return <strong>强意图已明确，跳过声音画像</strong>;
+  if (result.source === "skipped") return <strong>{result.error ?? "已跳过声音画像"}</strong>;
   if (result.source === "failed") return <strong>识别失败，使用手动画像</strong>;
   const ageLabels: Record<UserProfile["ageGroup"], string> = {
     child: "儿童",
@@ -513,7 +687,16 @@ function renderRouteResult(result: (RouteOutput & { agentName: string }) | null)
 }
 
 function routeSourceLabel(source: RouteOutput["source"]): string {
+  if (source === "session-lock") return "会话保持";
   if (source === "model") return "模型判断";
   if (source === "strong-rule") return "强意图规则";
   return "规则兜底";
+}
+
+function getClientSessionId() {
+  const existing = window.localStorage.getItem(clientSessionStorageKey);
+  if (existing) return existing;
+  const next = crypto.randomUUID();
+  window.localStorage.setItem(clientSessionStorageKey, next);
+  return next;
 }
