@@ -1,6 +1,7 @@
 import type { AgentConfig, ChatMessage } from "../shared/types";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { getRuntimeEnv } from "./runtimeEnv";
 
 interface GenerateReplyInput {
   agent: AgentConfig;
@@ -13,7 +14,9 @@ interface CreateRealtimeRoomInput {
   botId: string;
   connectorId?: string;
   voiceId?: string;
+  realtimeToken?: string;
   conversationId?: string;
+  roomMode?: "default" | "s2s";
 }
 
 interface CozeMessage {
@@ -23,11 +26,43 @@ interface CozeMessage {
   content_type?: string;
 }
 
+function parseCozeCode(errorText: string): number | undefined {
+  try {
+    const payload = JSON.parse(errorText) as { code?: number };
+    return payload.code;
+  } catch {
+    return undefined;
+  }
+}
+
+function formatCozeError(status: number, errorText: string): string {
+  const code = parseCozeCode(errorText);
+  try {
+    const payload = JSON.parse(errorText) as { msg?: string };
+    if (code === 4028) return "Coze 额度不足或配额未刷新，请等配额恢复或升级套餐";
+    if (code === 4100 || code === 4101) return "Coze 鉴权失效，请重新登录或刷新 token";
+    return `HTTP ${status}${payload.msg ? ` ${payload.msg}` : ""}`;
+  } catch {
+    return `HTTP ${status}${errorText ? ` ${errorText}` : ""}`;
+  }
+}
+
 export interface RealtimeRoomInfo {
   token: string;
   uid: string;
   room_id: string;
   app_id: string;
+}
+
+export class CozeApiError extends Error {
+  constructor(
+    message: string,
+    readonly status?: number,
+    readonly code?: number,
+    readonly raw?: string
+  ) {
+    super(message);
+  }
 }
 
 export class CozeAdapter {
@@ -48,8 +83,8 @@ export class CozeAdapter {
     return finalReply;
   }
 
-  async createRealtimeRoom(input: CreateRealtimeRoomInput): Promise<RealtimeRoomInfo> {
-    const token = this.getCozeToken();
+  async createRealtimeRoom(input: CreateRealtimeRoomInput, retryAuth = true): Promise<RealtimeRoomInfo> {
+    const token = this.getRealtimeToken(input.realtimeToken);
     if (!token) {
       throw new Error("缺少 Coze OpenAPI/OAuth token，无法创建实时语音房间");
     }
@@ -67,17 +102,43 @@ export class CozeAdapter {
         connector_id: input.connectorId ?? process.env.COZE_REALTIME_CONNECTOR_ID ?? "1024",
         voice_id: input.voiceId || undefined,
         conversation_id: input.conversationId || undefined,
-        uid: process.env.COZE_REALTIME_UID || undefined
+        uid: process.env.COZE_REALTIME_UID || undefined,
+        config: {
+          room_mode: input.roomMode ?? "default",
+          turn_detection: {
+            type: "server_vad"
+          }
+        }
       })
     });
 
     if (!response.ok) {
-      throw new Error(`Coze 实时语音房间创建失败：HTTP ${response.status}`);
+      const errorText = await response.text().catch(() => "");
+      if ((response.status === 401 || response.status === 403) && retryAuth) {
+        const fallbackToken = input.realtimeToken
+          ? this.readCliToken() ?? this.getRefreshedCozeToken()
+          : this.getRefreshedCozeToken();
+        if (fallbackToken && fallbackToken !== token) {
+          return this.createRealtimeRoom({ ...input, realtimeToken: fallbackToken }, false);
+        }
+      }
+      throw new CozeApiError(
+        `Coze 实时语音房间创建失败：${formatCozeError(response.status, errorText)}`,
+        response.status,
+        parseCozeCode(errorText),
+        errorText
+      );
     }
 
     const payload = await response.json() as { code?: number; msg?: string; data?: RealtimeRoomInfo };
     if (payload.code && payload.code !== 0) {
-      throw new Error(`Coze 实时语音房间创建失败：${payload.code} ${payload.msg ?? ""}`);
+      if ((payload.code === 4100 || payload.code === 4101) && retryAuth) {
+        const refreshedToken = this.getRefreshedCozeToken();
+        if (refreshedToken && refreshedToken !== token) {
+          return this.createRealtimeRoom({ ...input, realtimeToken: refreshedToken }, false);
+        }
+      }
+      throw new CozeApiError(`Coze 实时语音房间创建失败：${payload.code} ${payload.msg ?? ""}`, undefined, payload.code);
     }
     if (!payload.data?.token || !payload.data.room_id || !payload.data.app_id || !payload.data.uid) {
       throw new Error("Coze 实时语音房间创建失败：返回数据不完整");
@@ -111,11 +172,14 @@ export class CozeAdapter {
     });
 
     if (!response.ok) {
-      if ((response.status === 401 || response.status === 403) && retryAuth && this.refreshCliToken()) {
+      const errorText = await response.text().catch(() => "");
+      const code = parseCozeCode(errorText);
+      if ((response.status === 401 || response.status === 403 || code === 4100 || code === 4101) && retryAuth && this.refreshCliToken()) {
         return this.synthesizeSpeech(text, voiceId, false);
       }
-      console.warn(`Coze speech API error: HTTP ${response.status}`);
-      return undefined;
+      const message = `Coze 原生音色不可用：${formatCozeError(response.status, errorText)}`;
+      console.warn(message);
+      throw new CozeApiError(message, response.status, code, errorText);
     }
 
     const audio = await response.arrayBuffer();
@@ -124,11 +188,29 @@ export class CozeAdapter {
   }
 
   private getCozeToken(): string | undefined {
-    if (process.env.COZE_USE_CLI_TOKEN === "true") {
+    if (getRuntimeEnv("COZE_USE_CLI_TOKEN") === "true") {
+      this.refreshCliTokenIfNeeded();
+      return this.readCliToken() ?? getRuntimeEnv("COZE_API_TOKEN");
+    }
+    return getRuntimeEnv("COZE_API_TOKEN");
+  }
+
+  getVoiceRuntimeStatus() {
+    return {
+      useMock: this.useMock,
+      useCliToken: getRuntimeEnv("COZE_USE_CLI_TOKEN") === "true",
+      hasToken: Boolean(this.getCozeToken()),
+      hasCliProxy: Boolean(getRuntimeEnv("COZE_CLI_PROXY") || getRuntimeEnv("HTTPS_PROXY") || getRuntimeEnv("HTTP_PROXY"))
+    };
+  }
+
+  private getRealtimeToken(agentRealtimeToken?: string): string | undefined {
+    if (agentRealtimeToken) return agentRealtimeToken;
+    if (getRuntimeEnv("COZE_USE_CLI_TOKEN") === "true") {
       this.refreshCliTokenIfNeeded();
       return this.readCliToken();
     }
-    return process.env.COZE_API_TOKEN;
+    return this.getCozeToken();
   }
 
   private readCliToken(): string | undefined {
@@ -154,10 +236,14 @@ export class CozeAdapter {
   }
 
   private refreshCliToken(): boolean {
-    if (process.env.COZE_USE_CLI_TOKEN !== "true") return false;
+    if (getRuntimeEnv("COZE_USE_CLI_TOKEN") !== "true") return false;
+    const proxy = getRuntimeEnv("COZE_CLI_PROXY") || getRuntimeEnv("HTTPS_PROXY") || getRuntimeEnv("HTTP_PROXY");
     try {
       execFileSync("coze", ["auth", "status", "--format", "json"], {
         encoding: "utf8",
+        env: proxy
+          ? { ...process.env, HTTPS_PROXY: proxy, HTTP_PROXY: proxy }
+          : process.env,
         stdio: "pipe",
         timeout: 15_000
       });
@@ -337,10 +423,10 @@ export class CozeAdapter {
       return "好呀好呀，我来陪你。我们可以讲一个暖暖的小故事，也可以聊聊今天发生的开心事。";
     }
     if (input.agent.id === "study-coach") {
-      return "我们先把任务拆小一点：先做最容易开始的一题，再慢慢进入状态。";
+      return "Hi! I'm your English teacher. What would you like to improve today: speaking, travel English, work English, or something else?";
     }
     if (input.agent.id === "life-butler") {
-      return "我已经理解你的安排，会帮你把提醒时间和提醒对象确认清楚。";
+      return "俺老孙明白了！这事包在俺身上。先说说，你想让俺老孙帮你做点啥？";
     }
     return "我在这里，先陪你把这件事慢慢说清楚。";
   }

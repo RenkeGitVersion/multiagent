@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>语音画像识别流程图</title>
+  <style>
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background: #edf5fb;
+      font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    }
+
+    body {
+      display: grid;
+      place-items: center;
+      padding: 20px;
+    }
+
+    svg {
+      width: min(100vw - 40px, 1500px);
+      height: auto;
+      display: block;
+      border-radius: 24px;
+      box-shadow: 0 18px 48px rgba(24, 39, 75, .14);
+      background: #f8fbff;
+    }
+
+    text {
+      fill: #111827;
+      dominant-baseline: middle;
+    }
+
+    .title { font-size: 34px; font-weight: 900; }
+    .subtitle { font-size: 17px; fill: #667085; font-weight: 650; }
+    .step-title { font-size: 21px; font-weight: 900; }
+    .step-sub { font-size: 14px; fill: #526071; font-weight: 750; }
+    .tiny { font-size: 12px; fill: #667085; font-weight: 750; }
+    .label { font-size: 13px; fill: #fff; font-weight: 900; }
+    .result-title { font-size: 22px; font-weight: 900; }
+    .result-sub { font-size: 15px; fill: #526071; font-weight: 760; }
+  </style>
+</head>
+<body>
+<svg viewBox="0 0 1500 620" role="img" aria-label="语音画像识别流程图">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset=".64" stop-color="#f7fbff"/>
+      <stop offset="1" stop-color="#eef7ff"/>
+    </linearGradient>
+    <linearGradient id="sound" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1f6fa5"/>
+      <stop offset="1" stop-color="#34a5d7"/>
+    </linearGradient>
+    <linearGradient id="model" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e9f7ff"/>
+      <stop offset="1" stop-color="#cfeaff"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="9" flood-color="#18274b" flood-opacity=".12"/>
+    </filter>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M1,1 L9,5 L1,9 Z" fill="#2186c9"/>
+    </marker>
+  </defs>
+
+  <rect width="1500" height="620" fill="url(#bg)"/>
+  <circle cx="132" cy="110" r="150" fill="#2186c9" opacity=".07"/>
+  <circle cx="1320" cy="508" r="188" fill="#f19a3e" opacity=".07"/>
+
+  <text x="46" y="50" class="title">语音识别年龄与性别：从声音到用户画像</text>
+  <text x="46" y="88" class="subtitle">把用户的一小段语音转成“声音指纹”，再分别判断性别和年龄段，最终给路由系统使用</text>
+
+  <!-- Input audio -->
+  <g filter="url(#shadow)">
+    <rect x="56" y="196" width="190" height="170" rx="26" fill="#fff" stroke="#cbd8e3"/>
+    <circle cx="151" cy="250" r="38" fill="url(#sound)"/>
+    <rect x="138" y="222" width="26" height="52" rx="13" fill="#fff"/>
+    <path d="M122 258 C122 292, 180 292, 180 258" fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round"/>
+    <line x1="151" y1="292" x2="151" y2="314" stroke="#2186c9" stroke-width="7" stroke-linecap="round"/>
+    <line x1="132" y1="314" x2="170" y2="314" stroke="#2186c9" stroke-width="7" stroke-linecap="round"/>
+    <text x="151" y="338" text-anchor="middle" class="step-title">原始语音</text>
+  </g>
+
+  <!-- Preprocess -->
+  <g filter="url(#shadow)">
+    <rect x="316" y="196" width="230" height="170" rx="26" fill="#fff" stroke="#cbd8e3"/>
+    <rect x="356" y="242" width="150" height="44" rx="12" fill="#f7fbff" stroke="#9fb2c2"/>
+    <path d="M376 266 L392 250 L408 278 L424 238 L440 292 L456 254 L472 266" fill="none" stroke="#2186c9" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="431" y="332" text-anchor="middle" class="step-title">音频清洗</text>
+    <text x="431" y="356" text-anchor="middle" class="step-sub">统一采样率 / 去掉空白</text>
+  </g>
+
+  <!-- Voice fingerprint -->
+  <g filter="url(#shadow)">
+    <rect x="616" y="168" width="268" height="226" rx="30" fill="url(#model)" stroke="#7ab7e4" stroke-width="2"/>
+    <text x="750" y="206" text-anchor="middle" class="step-title">声音特征提取</text>
+    <text x="750" y="232" text-anchor="middle" class="step-sub">把声音变成“声音指纹”</text>
+
+    <rect x="674" y="266" width="152" height="78" rx="18" fill="#fff" stroke="#9fb2c2"/>
+    <line x1="700" y1="286" x2="700" y2="326" stroke="#2186c9" stroke-width="5" stroke-linecap="round"/>
+    <line x1="724" y1="296" x2="724" y2="326" stroke="#2186c9" stroke-width="5" stroke-linecap="round"/>
+    <line x1="748" y1="278" x2="748" y2="326" stroke="#2186c9" stroke-width="5" stroke-linecap="round"/>
+    <line x1="772" y1="304" x2="772" y2="326" stroke="#2186c9" stroke-width="5" stroke-linecap="round"/>
+    <line x1="796" y1="290" x2="796" y2="326" stroke="#2186c9" stroke-width="5" stroke-linecap="round"/>
+    <text x="750" y="374" text-anchor="middle" class="tiny">技术上对应频谱特征 / embedding</text>
+  </g>
+
+  <!-- Gender branch -->
+  <g filter="url(#shadow)">
+    <rect x="980" y="142" width="220" height="112" rx="22" fill="#fff" stroke="#75a8cf" stroke-width="1.8"/>
+    <circle cx="1030" cy="184" r="22" fill="#eaf7ff" stroke="#2186c9" stroke-width="2"/>
+    <text x="1030" y="184" text-anchor="middle" font-size="18" font-weight="900" fill="#2186c9">♀♂</text>
+    <text x="1100" y="176" text-anchor="middle" class="step-title">性别判断器</text>
+    <text x="1100" y="204" text-anchor="middle" class="step-sub">男 / 女 + 置信度</text>
+  </g>
+
+  <!-- Age branch -->
+  <g filter="url(#shadow)">
+    <rect x="980" y="344" width="220" height="112" rx="22" fill="#fff" stroke="#dfaa63" stroke-width="1.8"/>
+    <circle cx="1030" cy="386" r="22" fill="#fff4e6" stroke="#dfaa63" stroke-width="2"/>
+    <text x="1030" y="386" text-anchor="middle" font-size="18" font-weight="900" fill="#b56a11">岁</text>
+    <text x="1100" y="378" text-anchor="middle" class="step-title">年龄估算器</text>
+    <text x="1100" y="406" text-anchor="middle" class="step-sub">年龄值 / 年龄段</text>
+  </g>
+
+  <!-- Result -->
+  <g filter="url(#shadow)">
+    <rect x="1280" y="218" width="174" height="180" rx="28" fill="#fff" stroke="#cbd8e3" stroke-width="1.5"/>
+    <circle cx="1367" cy="270" r="36" fill="#eaf7ff" stroke="#2186c9" stroke-width="2"/>
+    <text x="1367" y="270" text-anchor="middle" font-size="24" font-weight="900" fill="#2186c9">ID</text>
+    <text x="1367" y="326" text-anchor="middle" class="result-title">用户画像</text>
+    <text x="1367" y="354" text-anchor="middle" class="result-sub">性别 + 年龄段</text>
+    <text x="1367" y="378" text-anchor="middle" class="tiny">用于弱意图路由</text>
+  </g>
+
+  <!-- Arrows -->
+  <line x1="246" y1="281" x2="316" y2="281" stroke="#2186c9" stroke-width="3" marker-end="url(#arrow)"/>
+  <line x1="546" y1="281" x2="616" y2="281" stroke="#2186c9" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M884 260 C920 224, 936 198, 980 198" fill="none" stroke="#2186c9" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M884 316 C920 352, 936 400, 980 400" fill="none" stroke="#2186c9" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M1200 198 C1236 198, 1246 270, 1280 270" fill="none" stroke="#2186c9" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M1200 400 C1236 400, 1246 354, 1280 354" fill="none" stroke="#2186c9" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <!-- Labels -->
+  <rect x="668" y="118" width="164" height="30" rx="15" fill="#2186c9"/>
+  <text x="750" y="133" text-anchor="middle" class="label">多模态语音模型</text>
+
+  <rect x="90" y="482" width="1320" height="64" rx="22" fill="#fff" stroke="#d4e1ec"/>
+  <text x="750" y="506" text-anchor="middle" font-size="16" font-weight="850" fill="#526071">
+    解释方式：不要把用户语音直接拿来判断，而是先抽取稳定的声音特征，再走两个轻量判断分支
+  </text>
+  <text x="750" y="532" text-anchor="middle" font-size="16" font-weight="850" fill="#526071">
+    输出结果不是绝对结论，而是“年龄段 / 性别 + 置信度”，供后续智能体匹配参考
+  </text>
+</svg>
+</body>
+</html>

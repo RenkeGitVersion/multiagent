@@ -20,14 +20,26 @@ interface SpeechRecognitionEvent extends Event {
   readonly results: SpeechRecognitionResultList;
 }
 
+interface SpeechRecognitionErrorEvent extends Event {
+  readonly error?: string;
+  readonly message?: string;
+}
+
 interface SpeechRecognition extends EventTarget {
   lang: string;
   interimResults: boolean;
   continuous: boolean;
   onstart: ((event: Event) => void) | null;
   onresult: ((event: SpeechRecognitionEvent) => void) | null;
-  onerror: ((event: Event) => void) | null;
+  onerror: ((event: SpeechRecognitionErrorEvent) => void) | null;
   onend: ((event: Event) => void) | null;
+  onaudiostart?: ((event: Event) => void) | null;
+  onaudioend?: ((event: Event) => void) | null;
+  onsoundstart?: ((event: Event) => void) | null;
+  onsoundend?: ((event: Event) => void) | null;
+  onspeechstart?: ((event: Event) => void) | null;
+  onspeechend?: ((event: Event) => void) | null;
+  onnomatch?: ((event: Event) => void) | null;
   start(): void;
   stop(): void;
 }

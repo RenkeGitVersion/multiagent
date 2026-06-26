@@ -6,7 +6,10 @@ const sceneKeywords: Record<string, string[]> = {
   健康: ["健康", "医生", "症状", "发烧", "咳嗽", "用药", "体检", "疼"],
   学习: ["学习", "学", "英语", "英文", "单词", "口语", "语法", "数学", "语文", "作业", "考试", "题目", "复习", "课程", "计划", "辅导"],
   提醒: ["提醒", "监督", "看电视", "时间到", "日程", "定时"],
-  陪伴: ["聊天", "心情", "难过", "无聊", "陪我", "孤独"]
+  智能家居: ["智能家居", "开灯", "关灯", "空调", "电视", "窗帘", "扫地机器人", "家居"],
+  通用任务: ["设定任务", "设置任务", "安排任务", "帮我记", "记一下", "待办", "todo", "通用问题"],
+  陪伴: ["聊天", "心情", "难过", "无聊", "陪我", "孤独"],
+  儿童陪伴: ["小孩", "孩子", "小朋友", "儿童", "宝宝", "陪小孩", "陪孩子", "带小孩", "带孩子", "哄孩子", "哄小孩"]
 };
 
 export async function routeAgent(input: RouteInput): Promise<RouteOutput> {
@@ -17,7 +20,7 @@ export async function routeAgent(input: RouteInput): Promise<RouteOutput> {
     return {
       agentId: input.lockedAgentId,
       intentStrength: "weak",
-      reason: "10 秒内连续对话，保持当前智能体",
+      reason: "20 秒内连续对话，保持当前智能体",
       confidence: 0.94,
       source: "session-lock"
     };
@@ -38,7 +41,7 @@ export function routeAgentByRules(input: RouteInput): RouteOutput {
     return {
       agentId: input.lockedAgentId,
       intentStrength: "weak",
-      reason: "10 秒内连续对话，保持当前智能体",
+      reason: "20 秒内连续对话，保持当前智能体",
       confidence: 0.94,
       source: "session-lock"
     };
@@ -89,6 +92,7 @@ async function routeWithModel(input: RouteInput): Promise<RouteOutput | undefine
   const wireApi = process.env.LLM_ROUTER_WIRE_API ?? "responses";
   if (!apiKey || !baseUrl || !model) return undefined;
 
+  const startedAt = Date.now();
   try {
     const content = wireApi === "chat"
       ? await callChatCompletionsRouter(baseUrl, apiKey, model, input)
@@ -96,6 +100,7 @@ async function routeWithModel(input: RouteInput): Promise<RouteOutput | undefine
     if (!content) return undefined;
     const parsed = JSON.parse(content) as { agentId?: string; reason?: string; confidence?: number };
     if (!parsed.agentId || !agents.some((agent) => agent.id === parsed.agentId)) return undefined;
+    console.info(`[Router] model route ${parsed.agentId} in ${Date.now() - startedAt}ms`);
 
     return {
       agentId: parsed.agentId,
@@ -104,13 +109,14 @@ async function routeWithModel(input: RouteInput): Promise<RouteOutput | undefine
       confidence: Math.max(0.5, Math.min(0.98, parsed.confidence ?? 0.75)),
       source: "model"
     };
-  } catch {
+  } catch (error) {
+    console.info(`[Router] model route fallback in ${Date.now() - startedAt}ms: ${error instanceof Error ? error.message : String(error)}`);
     return undefined;
   }
 }
 
 async function callResponsesRouter(baseUrl: string, apiKey: string, model: string, input: RouteInput): Promise<string | undefined> {
-  const response = await fetch(`${baseUrl.replace(/\/$/, "")}/responses`, {
+  const response = await fetchWithTimeout(`${baseUrl.replace(/\/$/, "")}/responses`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -118,8 +124,9 @@ async function callResponsesRouter(baseUrl: string, apiKey: string, model: strin
     },
     body: JSON.stringify({
       model,
-      reasoning: { effort: process.env.LLM_ROUTER_REASONING_EFFORT ?? "high" },
+      reasoning: { effort: process.env.LLM_ROUTER_REASONING_EFFORT ?? "minimal" },
       store: false,
+      max_output_tokens: 80,
       input: [
         {
           role: "system",
@@ -144,7 +151,7 @@ async function callResponsesRouter(baseUrl: string, apiKey: string, model: strin
 }
 
 async function callChatCompletionsRouter(baseUrl: string, apiKey: string, model: string, input: RouteInput): Promise<string | undefined> {
-  const response = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
+  const response = await fetchWithTimeout(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -153,6 +160,7 @@ async function callChatCompletionsRouter(baseUrl: string, apiKey: string, model:
     body: JSON.stringify({
       model,
       temperature: 0,
+      max_tokens: 80,
       response_format: { type: "json_object" },
       messages: [
         { role: "system", content: buildRouterSystemPrompt() },
@@ -165,17 +173,25 @@ async function callChatCompletionsRouter(baseUrl: string, apiKey: string, model:
   return payload.choices?.[0]?.message?.content;
 }
 
+async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+  const timeoutMs = Number(process.env.LLM_ROUTER_TIMEOUT_MS ?? 4000);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function buildRouterSystemPrompt(): string {
   return [
-    "你是多智能体系统的弱意图路由器。只输出 JSON，不要输出 Markdown。",
-    "候选 agentId 只有：little-fox, doctor-chen, study-coach, life-butler, companion-lan。",
-    "强唤醒词已在外层处理；这里处理自然语言弱意图。",
-    "定时、监督、提醒类任务优先选择 life-butler。",
-    "学习语言、作业、课程、考试、题目、学习计划选择 study-coach。",
-    "症状、健康、用药、体检选择 doctor-chen。",
-    "故事、睡前、儿童陪伴选择 little-fox。",
-    "情绪、闲聊、陪伴选择 companion-lan。",
-    "返回 JSON：{\"agentId\":\"...\",\"reason\":\"...\",\"confidence\":0.0}"
+    "只输出JSON:{\"agentId\":\"...\",\"reason\":\"...\",\"confidence\":0.0}",
+    "候选: little-fox=虎子/儿童陪伴/陪小孩/带孩子/哄孩子/故事/睡前; doctor-chen=健康顾问/症状/健康/用药/体检; study-coach=英语/学习/作业/考试/题目; life-butler=孙悟空/悟空/齐天大圣/冒险/解谜/鼓励/提醒; companion-lan=豆包/通用助手/智能家居/通用问题/设定任务/待办。",
+    "强唤醒词外层已处理。儿童、小孩、小朋友、宝宝相关陪伴优先 little-fox，不要选 doctor-chen，除非明确健康/症状/用药。"
   ].join("\n");
 }
 
@@ -183,22 +199,18 @@ function buildRouterPayload(input: RouteInput) {
   return {
     queryText: input.queryText,
     profile: input.profile,
-    currentAgentId: input.currentAgentId,
-    agents: agents.map((agent) => ({
-      id: agent.id,
-      displayName: agent.displayName,
-      personaTags: agent.personaTags,
-      serviceScenes: agent.serviceScenes,
-      targetAgeGroups: agent.targetAgeGroups
-    }))
+    currentAgentId: input.currentAgentId
   };
 }
 
 function matchDomainIntent(query: string): { agentId: string; scene: string; keyword: string } | undefined {
   const domainPriority = [
     { scene: "提醒", agentId: "life-butler" },
+    { scene: "智能家居", agentId: "companion-lan" },
+    { scene: "通用任务", agentId: "companion-lan" },
     { scene: "学习", agentId: "study-coach" },
     { scene: "健康", agentId: "doctor-chen" },
+    { scene: "儿童陪伴", agentId: "little-fox" },
     { scene: "故事", agentId: "little-fox" },
     { scene: "陪伴", agentId: "companion-lan" }
   ];
@@ -220,9 +232,9 @@ function scoreAgent(agent: AgentConfig, input: RouteInput): number {
   let score = agent.priority / 100;
   const query = input.queryText;
 
-  if (agent.targetAgeGroups.includes(input.profile.ageGroup)) score += 1.1;
+  if (agent.targetAgeGroups.includes(input.profile.ageGroup)) score += 0.65;
   if (agent.targetGenders.includes(input.profile.gender) || agent.targetGenders.includes("unknown")) {
-    score += 0.4;
+    score += 0.2;
   }
 
   for (const scene of agent.serviceScenes) {

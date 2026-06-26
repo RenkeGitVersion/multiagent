@@ -21,6 +21,7 @@ export interface AgentConfig {
   id: string;
   cozeBotId: string;
   cozeVoiceId?: string;
+  cozeRealtimeTokenEnv?: string;
   cozeConversationId?: string;
   agentWorldUsername?: string;
   agentWorldApiKey?: string;
@@ -91,4 +92,22 @@ export interface TaskFiredEvent {
   task: ReminderTask;
   agent: AgentConfig;
   assistantText: string;
+}
+
+export interface CozeRealtimeAgentStatus {
+  id: string;
+  displayName: string;
+  hasBotId: boolean;
+  hasVoiceId: boolean;
+  hasRealtimeTokenEnv: boolean;
+  hasRealtimeTokenValue: boolean;
+}
+
+export interface CozeVoiceRuntimeStatus {
+  useMock: boolean;
+  useCliToken: boolean;
+  hasToken: boolean;
+  hasCliProxy: boolean;
+  hasAnyRealtimeToken: boolean;
+  realtimeAgents: CozeRealtimeAgentStatus[];
 }

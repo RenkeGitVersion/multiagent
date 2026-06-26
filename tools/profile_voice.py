@@ -57,9 +57,42 @@ def load_audio(path: Path, seconds: float | None) -> np.ndarray:
         audio = np.mean(audio, axis=1)
     if sample_rate != TARGET_SAMPLE_RATE:
         raise ValueError(f"Expected {TARGET_SAMPLE_RATE} Hz audio, got {sample_rate} Hz. Convert before running.")
+    audio = audio.astype(np.float32)
+    audio = trim_silence(audio)
     if seconds:
         audio = audio[: int(TARGET_SAMPLE_RATE * seconds)]
-    return audio.astype(np.float32)
+    peak = float(np.max(np.abs(audio))) if audio.size else 0.0
+    if peak > 0:
+        audio = audio / peak * 0.95
+    return audio
+
+
+def trim_silence(audio: np.ndarray) -> np.ndarray:
+    if audio.size == 0:
+        return audio
+    threshold = max(float(np.max(np.abs(audio))) * 0.08, 0.01)
+    speech_indices = np.flatnonzero(np.abs(audio) > threshold)
+    if speech_indices.size == 0:
+        return audio
+    pad = int(TARGET_SAMPLE_RATE * 0.12)
+    start = max(int(speech_indices[0]) - pad, 0)
+    end = min(int(speech_indices[-1]) + pad, audio.size)
+    return audio[start:end]
+
+
+def make_segments(audio: np.ndarray, seconds: float | None) -> list[np.ndarray]:
+    if audio.size == 0:
+        return [audio]
+    max_samples = int(TARGET_SAMPLE_RATE * seconds) if seconds else audio.size
+    window_samples = min(audio.size, max(int(TARGET_SAMPLE_RATE * 1.2), min(max_samples, int(TARGET_SAMPLE_RATE * 2.2))))
+    if audio.size <= window_samples:
+        return [audio[:window_samples]]
+    starts = [0, max((audio.size - window_samples) // 2, 0), audio.size - window_samples]
+    unique_starts = []
+    for start in starts:
+        if start not in unique_starts:
+            unique_starts.append(start)
+    return [audio[start:start + window_samples] for start in unique_starts]
 
 
 def age_group(age_years: float) -> str:
@@ -85,17 +118,21 @@ def main() -> None:
     model.eval()
     load_seconds = time.perf_counter() - started
 
-    audio = load_audio(args.audio, args.seconds)
-    processed = feature_extractor(audio, sampling_rate=TARGET_SAMPLE_RATE)
-    input_values = torch.from_numpy(processed["input_values"][0]).reshape(1, -1)
-
     infer_started = time.perf_counter()
+    audio = load_audio(args.audio, args.seconds)
+    ages = []
+    gender_probs_list = []
     with torch.inference_mode():
-        _, logits_age, logits_gender = model(input_values)
+        for segment in make_segments(audio, args.seconds):
+            processed = feature_extractor(segment, sampling_rate=TARGET_SAMPLE_RATE)
+            input_values = torch.from_numpy(processed["input_values"][0]).reshape(1, -1)
+            _, logits_age, logits_gender = model(input_values)
+            ages.append(float(logits_age[0][0].item() * 100))
+            gender_probs_list.append(logits_gender[0].detach().cpu().numpy())
     infer_seconds = time.perf_counter() - infer_started
 
-    age_years = float(logits_age[0][0].item() * 100)
-    gender_probs = logits_gender[0].detach().cpu().numpy()
+    age_years = float(np.median(np.array(ages))) if ages else 0.0
+    gender_probs = np.mean(np.stack(gender_probs_list), axis=0) if gender_probs_list else np.array([0.0, 0.0, 0.0])
     labels = ["female", "male", "child"]
     best_index = int(np.argmax(gender_probs))
 
@@ -106,6 +143,7 @@ def main() -> None:
         "ageGroup": age_group(age_years),
         "gender": labels[best_index],
         "genderConfidence": round(float(gender_probs[best_index]), 4),
+        "segments": len(gender_probs_list),
         "genderProbabilities": {
             label: round(float(prob), 4)
             for label, prob in zip(labels, gender_probs)

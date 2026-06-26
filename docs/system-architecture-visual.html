@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>多智能体语音系统架构图</title>
+  <style>
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background: #f3f8fc;
+      font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", Arial, sans-serif;
+    }
+
+    body {
+      display: grid;
+      place-items: center;
+      padding: 20px;
+    }
+
+    svg {
+      width: min(100vw - 40px, 1680px);
+      height: auto;
+      display: block;
+      border-radius: 20px;
+      background: #fbfdff;
+      box-shadow: 0 18px 48px rgba(23, 46, 82, .12);
+    }
+
+    text {
+      fill: #1f2a3d;
+      dominant-baseline: middle;
+    }
+
+    .layer-title { font-size: 22px; font-weight: 900; }
+    .layer-sub { font-size: 13px; fill: #59687b; font-weight: 800; }
+    .top-title { font-size: 18px; font-weight: 900; }
+    .top-sub { font-size: 13px; fill: #59687b; font-weight: 800; }
+    .small { font-size: 12px; fill: #536274; font-weight: 800; }
+    .mini { font-size: 10.5px; fill: #6a7788; font-weight: 800; }
+    .agent-name { font-size: 19px; font-weight: 900; }
+    .agent-sub { font-size: 11px; fill: #657386; font-weight: 800; }
+    .white { fill: #fff; font-size: 14px; font-weight: 900; }
+    .route-title { font-size: 14px; fill: #536274; font-weight: 900; }
+  </style>
+</head>
+<body>
+<svg viewBox="0 0 1600 780" role="img" aria-label="多智能体语音系统架构图">
+  <defs>
+    <linearGradient id="pageBg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset=".58" stop-color="#f9fcff"/>
+      <stop offset="1" stop-color="#f0f8ff"/>
+    </linearGradient>
+    <filter id="softShadow" x="-18%" y="-18%" width="136%" height="136%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#31506d" flood-opacity=".13"/>
+    </filter>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M1,1 L9,5 L1,9 Z" fill="#1395cf"/>
+    </marker>
+    <clipPath id="avatarClip">
+      <circle cx="0" cy="0" r="25"/>
+    </clipPath>
+  </defs>
+
+  <rect width="1600" height="780" fill="url(#pageBg)"/>
+  <circle cx="220" cy="70" r="160" fill="#1395cf" opacity=".06"/>
+  <circle cx="1350" cy="715" r="190" fill="#f6a33c" opacity=".06"/>
+
+  <!-- Left layer labels -->
+  <g filter="url(#softShadow)">
+    <rect x="54" y="46" width="200" height="92" rx="18" fill="#fff" stroke="#b9cfdd" stroke-width="1.8"/>
+    <text x="82" y="80" font-size="22">👱</text>
+    <text x="126" y="78" class="layer-title">交互入口</text>
+    <text x="126" y="112" class="layer-sub">音箱 / 手机</text>
+
+    <rect x="54" y="188" width="200" height="88" rx="18" fill="#fff" stroke="#b9cfdd" stroke-width="1.8"/>
+    <text x="82" y="222" font-size="22">🔐</text>
+    <text x="126" y="220" class="layer-title">服务网关</text>
+    <text x="126" y="252" class="layer-sub">API / 鉴权 / 房间</text>
+
+    <rect x="54" y="340" width="200" height="142" rx="18" fill="#fff" stroke="#b9cfdd" stroke-width="1.8"/>
+    <text x="82" y="405" font-size="22">🧠</text>
+    <text x="126" y="398" class="layer-title">AI 编排层</text>
+    <text x="126" y="436" class="layer-sub">理解 / 路由</text>
+
+    <rect x="54" y="548" width="224" height="136" rx="18" fill="#fff" stroke="#b9cfdd" stroke-width="1.8"/>
+    <text x="82" y="610" font-size="22">🤖</text>
+    <text x="126" y="604" class="layer-title">Agent 与平台</text>
+    <text x="126" y="638" class="layer-sub">Agent / Memory</text>
+  </g>
+
+  <!-- Layer backgrounds -->
+  <rect x="288" y="40" width="1182" height="116" rx="24" fill="none" stroke="#d8e8f3" stroke-width="1.5" stroke-dasharray="7 8"/>
+  <rect x="288" y="176" width="1182" height="106" rx="24" fill="none" stroke="#d8e8f3" stroke-width="1.5" stroke-dasharray="7 8"/>
+  <rect x="288" y="312" width="1182" height="176" rx="24" fill="none" stroke="#d8e8f3" stroke-width="1.5" stroke-dasharray="7 8"/>
+  <rect x="288" y="536" width="1182" height="150" rx="24" fill="none" stroke="#d8e8f3" stroke-width="1.5" stroke-dasharray="7 8"/>
+
+  <!-- Interaction entry -->
+  <g filter="url(#softShadow)">
+    <rect x="430" y="54" width="290" height="86" rx="18" fill="#fff" stroke="#1395cf" stroke-width="2.4"/>
+    <text x="575" y="77" text-anchor="middle" font-size="24">🏠</text>
+    <text x="575" y="104" text-anchor="middle" class="top-title">带屏智能音箱</text>
+    <text x="575" y="126" text-anchor="middle" class="top-sub">语音输入 / Agent 显示</text>
+
+    <rect x="976" y="54" width="290" height="86" rx="18" fill="#fff" stroke="#1395cf" stroke-width="2.4"/>
+    <text x="1121" y="77" text-anchor="middle" font-size="24">📱</text>
+    <text x="1121" y="104" text-anchor="middle" class="top-title">手机端控制台</text>
+    <text x="1121" y="124" text-anchor="middle" class="top-sub">Agent 管理</text>
+    <text x="1121" y="140" text-anchor="middle" class="top-sub">任务与隐私</text>
+  </g>
+
+  <!-- Gateway -->
+  <g filter="url(#softShadow)">
+    <rect x="452" y="202" width="780" height="56" rx="16" fill="#fff" stroke="#93b5cb" stroke-width="1.8"/>
+    <rect x="474" y="212" width="224" height="36" rx="10" fill="#f1f8fd" stroke="#c4d8e5"/>
+    <text x="586" y="230" text-anchor="middle" class="small">API Gateway</text>
+    <rect x="730" y="212" width="224" height="36" rx="10" fill="#f1f8fd" stroke="#c4d8e5"/>
+    <text x="842" y="230" text-anchor="middle" class="small">Auth</text>
+    <rect x="986" y="212" width="224" height="36" rx="10" fill="#f1f8fd" stroke="#c4d8e5"/>
+    <text x="1098" y="230" text-anchor="middle" class="small">Realtime Room</text>
+  </g>
+
+  <!-- Security boundary -->
+  <g filter="url(#softShadow)">
+    <rect x="1418" y="188" width="152" height="276" rx="18" fill="#fff" stroke="#b9cfdd" stroke-width="1.8"/>
+    <text x="1494" y="224" text-anchor="middle" class="top-title">后端安全边界</text>
+    <text x="1494" y="274" text-anchor="middle" class="small">Token 后端隔离</text>
+    <text x="1494" y="314" text-anchor="middle" class="small">隐私策略控制</text>
+    <text x="1494" y="354" text-anchor="middle" class="small">Memory 可清理</text>
+    <text x="1494" y="394" text-anchor="middle" class="small">手机端配置</text>
+    <text x="1494" y="434" text-anchor="middle" class="small">音箱端执行授权</text>
+  </g>
+
+  <!-- Orchestrator -->
+  <g filter="url(#softShadow)">
+    <rect x="450" y="336" width="780" height="126" rx="22" fill="#dff4ff" stroke="#1aa4d8" stroke-width="2.5"/>
+    <rect x="470" y="356" width="235" height="42" rx="12" fill="#fff" stroke="#1395cf" stroke-width="2"/>
+    <text x="588" y="377" text-anchor="middle" class="route-title">基于唤醒词的匹配</text>
+    <rect x="470" y="412" width="235" height="42" rx="12" fill="#fff" stroke="#1395cf" stroke-width="2"/>
+    <text x="588" y="433" text-anchor="middle" class="route-title">模糊意图的匹配</text>
+
+    <rect x="760" y="358" width="174" height="82" rx="18" fill="#c9efff" stroke="#078dc8" stroke-width="2.5"/>
+    <text x="847" y="389" text-anchor="middle" font-size="24" font-weight="900">Agent</text>
+    <text x="847" y="421" text-anchor="middle" font-size="24" font-weight="900">Orchestrator</text>
+
+    <rect x="988" y="358" width="236" height="82" rx="16" fill="#fff" stroke="#a6bdca" stroke-width="1.8"/>
+    <text x="1106" y="383" text-anchor="middle" class="route-title">路由输出</text>
+    <text x="1106" y="414" text-anchor="middle" class="small">agentId / reason</text>
+    <text x="1106" y="438" text-anchor="middle" class="small">confidence</text>
+  </g>
+
+  <!-- Agents -->
+  <g filter="url(#softShadow)">
+    <rect x="306" y="552" width="164" height="104" rx="16" fill="#fff5e8" stroke="#e9a04b" stroke-width="2"/>
+    <circle cx="388" cy="588" r="25" fill="#fff"/>
+    <image href="../public/agents/child-companion.png" x="363" y="563" width="50" height="50" preserveAspectRatio="xMidYMid slice"/>
+    <text x="388" y="624" text-anchor="middle" class="agent-name">虎子</text>
+    <text x="388" y="646" text-anchor="middle" class="agent-sub">儿童陪伴</text>
+
+    <rect x="496" y="552" width="164" height="104" rx="16" fill="#eaf7ff" stroke="#55a8d6" stroke-width="2"/>
+    <circle cx="578" cy="588" r="25" fill="#fff"/>
+    <image href="../public/agents/health-advisor.png" x="553" y="563" width="50" height="50" preserveAspectRatio="xMidYMid slice"/>
+    <text x="578" y="624" text-anchor="middle" class="agent-name">健康顾问</text>
+    <text x="578" y="646" text-anchor="middle" class="agent-sub">健康咨询</text>
+
+    <rect x="686" y="552" width="164" height="104" rx="16" fill="#fff5e8" stroke="#e9a04b" stroke-width="2"/>
+    <circle cx="768" cy="588" r="25" fill="#fff"/>
+    <image href="../public/agents/english-teacher.png" x="743" y="563" width="50" height="50" preserveAspectRatio="xMidYMid slice"/>
+    <text x="768" y="624" text-anchor="middle" class="agent-name">英语外教</text>
+    <text x="768" y="646" text-anchor="middle" class="agent-sub">口语学习</text>
+
+    <rect x="876" y="552" width="164" height="104" rx="16" fill="#fff5e8" stroke="#e9a04b" stroke-width="2"/>
+    <circle cx="958" cy="588" r="25" fill="#fff"/>
+    <image href="../public/agents/sun-wukong.png" x="933" y="563" width="50" height="50" preserveAspectRatio="xMidYMid slice"/>
+    <text x="958" y="624" text-anchor="middle" class="agent-name">孙悟空</text>
+    <text x="958" y="646" text-anchor="middle" class="agent-sub">娱乐陪伴</text>
+
+    <rect x="1066" y="552" width="164" height="104" rx="16" fill="#eaf7ff" stroke="#55a8d6" stroke-width="2"/>
+    <circle cx="1148" cy="588" r="25" fill="#fff"/>
+    <image href="../public/agents/doubao.png" x="1123" y="563" width="50" height="50" preserveAspectRatio="xMidYMid slice"/>
+    <text x="1148" y="624" text-anchor="middle" class="agent-name">豆包</text>
+    <text x="1148" y="646" text-anchor="middle" class="agent-sub">通用家居</text>
+
+    <rect x="1256" y="552" width="164" height="104" rx="16" fill="#fff" stroke="#9bbbd0" stroke-width="2" stroke-dasharray="7 7"/>
+    <text x="1338" y="588" text-anchor="middle" font-size="38" font-weight="900">+</text>
+    <text x="1338" y="624" text-anchor="middle" class="agent-name">新增</text>
+    <text x="1338" y="646" text-anchor="middle" class="agent-sub">可扩展</text>
+  </g>
+
+  <!-- Bottom modules -->
+  <g filter="url(#softShadow)">
+    <rect x="350" y="708" width="168" height="60" rx="13" fill="#fff" stroke="#b6cbd9" stroke-width="1.6"/>
+    <text x="434" y="730" text-anchor="middle" class="top-title">用户画像</text>
+    <text x="434" y="754" text-anchor="middle" class="small">年龄 / 性别</text>
+
+    <rect x="552" y="708" width="168" height="60" rx="13" fill="#fff" stroke="#b6cbd9" stroke-width="1.6"/>
+    <text x="636" y="730" text-anchor="middle" class="top-title">长期 Memory</text>
+    <text x="636" y="754" text-anchor="middle" class="small">偏好 / 家庭成员</text>
+
+    <rect x="754" y="708" width="168" height="60" rx="13" fill="#fff" stroke="#b6cbd9" stroke-width="1.6"/>
+    <text x="838" y="730" text-anchor="middle" class="top-title">Task Store</text>
+    <text x="838" y="754" text-anchor="middle" class="small">提醒 / 状态</text>
+
+    <rect x="956" y="708" width="168" height="60" rx="13" fill="#fff" stroke="#b6cbd9" stroke-width="1.6"/>
+    <text x="1040" y="730" text-anchor="middle" class="top-title">Coze Voice</text>
+    <text x="1040" y="754" text-anchor="middle" class="small">Bot / Voice / Token</text>
+
+    <rect x="1158" y="708" width="168" height="60" rx="13" fill="#fff" stroke="#b6cbd9" stroke-width="1.6"/>
+    <text x="1242" y="730" text-anchor="middle" class="top-title">Privacy Center</text>
+    <text x="1242" y="754" text-anchor="middle" class="small">权限 / 保存策略</text>
+  </g>
+
+  <!-- Key arrows only -->
+  <path d="M575 140 L575 200" fill="none" stroke="#1395cf" stroke-width="4" marker-end="url(#arrow)"/>
+  <path d="M1121 140 L1121 200" fill="none" stroke="#1395cf" stroke-width="4" marker-end="url(#arrow)"/>
+  <path d="M842 258 L842 336" fill="none" stroke="#1395cf" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M847 462 L847 550" fill="none" stroke="#2e3e51" stroke-width="3" marker-end="url(#arrow)"/>
+</svg>
+</body>
+</html>

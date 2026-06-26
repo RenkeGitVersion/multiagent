@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>智能体个性化匹配方案</title>
+  <style>
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background: #f5f7fb;
+      font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    }
+
+    body {
+      display: grid;
+      place-items: center;
+      padding: 20px;
+    }
+
+    svg {
+      width: min(100vw - 40px, 1760px);
+      height: auto;
+      display: block;
+      background: #fff;
+      border-radius: 24px;
+      box-shadow: 0 18px 52px rgba(15, 23, 42, .14);
+    }
+
+    text {
+      fill: #101828;
+      dominant-baseline: middle;
+    }
+
+    .title { font-size: 40px; font-weight: 950; }
+    .subtitle { font-size: 18px; fill: #667085; font-weight: 700; }
+    .section-title { font-size: 26px; font-weight: 900; }
+    .section-sub { font-size: 15px; fill: #667085; font-weight: 760; }
+    .node-title { font-size: 19px; font-weight: 900; }
+    .node-sub { font-size: 13px; fill: #526071; font-weight: 760; }
+    .tiny { font-size: 12px; fill: #667085; font-weight: 720; }
+    .small { font-size: 14px; fill: #475467; font-weight: 800; }
+    .pill { font-size: 13px; fill: #fff; font-weight: 900; }
+    .code { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12px; fill: #344054; font-weight: 760; }
+    .code-green { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12px; fill: #159947; font-weight: 780; }
+    .adv-title { font-size: 18px; font-weight: 950; }
+    .adv-text { font-size: 15px; fill: #344054; font-weight: 760; }
+  </style>
+</head>
+<body>
+<svg viewBox="0 0 1760 1120" role="img" aria-label="基于用户特征和场景特征的智能体个性化匹配方案">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset=".62" stop-color="#f8fbff"/>
+      <stop offset="1" stop-color="#eef6ff"/>
+    </linearGradient>
+    <linearGradient id="green" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#d9fbe8"/>
+      <stop offset="1" stop-color="#bff2d2"/>
+    </linearGradient>
+    <linearGradient id="yellow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff4cd"/>
+      <stop offset="1" stop-color="#ffe7a8"/>
+    </linearGradient>
+    <linearGradient id="blue" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ecf7ff"/>
+      <stop offset="1" stop-color="#d2ebff"/>
+    </linearGradient>
+    <linearGradient id="purple" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f1edff"/>
+      <stop offset="1" stop-color="#ddd4ff"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="9" flood-color="#18274b" flood-opacity=".12"/>
+    </filter>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M1,1 L9,5 L1,9 Z" fill="#101828"/>
+    </marker>
+    <marker id="arrowBlue" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M1,1 L9,5 L1,9 Z" fill="#2186c9"/>
+    </marker>
+  </defs>
+
+  <rect width="1760" height="1120" fill="url(#bg)"/>
+  <circle cx="130" cy="120" r="180" fill="#2186c9" opacity=".06"/>
+  <circle cx="1560" cy="900" r="250" fill="#f59e0b" opacity=".07"/>
+
+  <text x="44" y="56" class="title">智能体个性化匹配</text>
+  <text x="44" y="96" class="subtitle">把“用户是谁”与“用户要做什么”显式加入路由流程：数据先召回，LLM 再做语义裁决</text>
+
+  <!-- Section headers -->
+  <g filter="url(#shadow)">
+    <rect x="34" y="132" width="846" height="78" rx="20" fill="#fff" stroke="#101828" stroke-width="1.4"/>
+    <text x="457" y="171" text-anchor="middle" class="section-title">方法创新：用户特征 × 场景特征的个性化匹配链路</text>
+
+    <rect x="910" y="132" width="816" height="78" rx="20" fill="#fff" stroke="#101828" stroke-width="1.4"/>
+    <text x="1318" y="171" text-anchor="middle" class="section-title">多模态模型识别性别与年龄</text>
+    <text x="1648" y="171" text-anchor="middle" fill="#e00000" font-size="20" font-weight="950">补充准确率</text>
+  </g>
+
+  <!-- Left panel background -->
+  <rect x="34" y="238" width="846" height="570" rx="28" fill="#fff" opacity=".76" stroke="#d6dde8"/>
+
+  <!-- Voice input icon -->
+  <g filter="url(#shadow)">
+    <rect x="76" y="286" width="134" height="74" rx="16" fill="#f1f5ff" stroke="#d6dde8"/>
+    <path d="M112 324 C126 306, 146 306, 160 324" fill="none" stroke="#2186c9" stroke-width="4" stroke-linecap="round"/>
+    <rect x="132" y="301" width="22" height="42" rx="11" fill="#2186c9"/>
+    <text x="143" y="376" text-anchor="middle" class="node-title">语音输入</text>
+  </g>
+
+  <!-- ASR + profile split -->
+  <g filter="url(#shadow)">
+    <rect x="270" y="276" width="160" height="86" rx="18" fill="url(#yellow)" stroke="#f0c45d"/>
+    <text x="350" y="306" text-anchor="middle" class="node-title">ASR 转写</text>
+    <text x="350" y="334" text-anchor="middle" class="node-sub">得到 query</text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="270" y="412" width="160" height="86" rx="18" fill="url(#green)" stroke="#81d7a0"/>
+    <text x="350" y="442" text-anchor="middle" class="node-title">语音画像</text>
+    <text x="350" y="470" text-anchor="middle" class="node-sub">年龄段 / 性别</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="486" y="344" width="180" height="92" rx="20" fill="#fff" stroke="#cbd5e1"/>
+    <text x="576" y="373" text-anchor="middle" class="node-title">场景归一</text>
+    <text x="576" y="400" text-anchor="middle" class="node-sub">规则优先，低置信小模型</text>
+    <text x="576" y="420" text-anchor="middle" class="tiny">5 类场景之一</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="722" y="302" width="118" height="176" rx="20" fill="url(#blue)" stroke="#7ab7e4"/>
+    <text x="781" y="330" text-anchor="middle" class="node-title">偏好矩阵</text>
+    <text x="781" y="360" text-anchor="middle" class="node-sub">用户类型</text>
+    <text x="781" y="384" text-anchor="middle" class="node-sub">× 场景</text>
+    <text x="781" y="408" text-anchor="middle" class="node-sub">× Agent 类型</text>
+    <rect x="748" y="438" width="66" height="24" rx="12" fill="#2186c9"/>
+    <text x="781" y="450" text-anchor="middle" class="pill">查均值</text>
+  </g>
+
+  <!-- Scoring table -->
+  <g filter="url(#shadow)">
+    <rect x="110" y="548" width="348" height="190" rx="22" fill="#fffaf0" stroke="#f0c45d"/>
+    <text x="284" y="580" text-anchor="middle" class="node-title">例：儿童 + 健康咨询</text>
+    <line x1="138" y1="606" x2="430" y2="606" stroke="#f0c45d"/>
+    <text x="154" y="632" class="small">亲密陪伴型：4.24</text>
+    <text x="154" y="660" class="small">鼓励赞赏型：4.56</text>
+    <text x="154" y="688" class="small">成熟关怀型：4.92</text>
+    <text x="154" y="716" class="small">专业可靠型：4.48</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="510" y="548" width="330" height="190" rx="22" fill="#f8fafc" stroke="#cbd5e1"/>
+    <text x="675" y="580" text-anchor="middle" class="node-title">Agent 偏好分 = 两个标签均值</text>
+    <line x1="536" y1="606" x2="814" y2="606" stroke="#cbd5e1"/>
+    <text x="548" y="632" class="small">健康顾问：4.70</text>
+    <text x="548" y="660" class="small">孙悟空：4.58</text>
+    <text x="548" y="688" class="small">英语外教：4.52</text>
+    <text x="548" y="716" class="small">虎子：4.40</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="304" y="766" width="306" height="54" rx="18" fill="#fff4df" stroke="#101828" stroke-width="1.4"/>
+    <text x="457" y="793" text-anchor="middle" font-size="22" font-weight="950">召回 TOP3：健康顾问 / 孙悟空 / 英语外教</text>
+  </g>
+
+  <!-- Right panel background -->
+  <rect x="910" y="238" width="816" height="570" rx="28" fill="#fff" opacity=".76" stroke="#d6dde8"/>
+
+  <!-- Multimodal flow -->
+  <g filter="url(#shadow)">
+    <rect x="956" y="292" width="132" height="82" rx="18" fill="#fff" stroke="#d6dde8"/>
+    <path d="M982 334 C994 318, 1012 318, 1024 334" fill="none" stroke="#2186c9" stroke-width="4" stroke-linecap="round"/>
+    <rect x="1006" y="310" width="22" height="42" rx="11" fill="#2186c9"/>
+    <text x="1022" y="400" text-anchor="middle" class="node-title">原始语音</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="1150" y="292" width="142" height="82" rx="18" fill="#fff" stroke="#d6dde8"/>
+    <circle cx="1221" cy="326" r="27" fill="#ecf7ff" stroke="#2186c9" stroke-width="2"/>
+    <path d="M1203 326 L1239 326 M1221 308 L1221 344" stroke="#2186c9" stroke-width="4" stroke-linecap="round"/>
+    <text x="1221" y="400" text-anchor="middle" class="node-title">预处理</text>
+    <text x="1221" y="424" text-anchor="middle" class="node-sub">16kHz / 裁剪</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="1354" y="292" width="154" height="82" rx="18" fill="#fff" stroke="#d6dde8"/>
+    <line x1="1390" y1="348" x2="1390" y2="318" stroke="#2186c9" stroke-width="5" stroke-linecap="round"/>
+    <line x1="1414" y1="348" x2="1414" y2="306" stroke="#2186c9" stroke-width="5" stroke-linecap="round"/>
+    <line x1="1438" y1="348" x2="1438" y2="328" stroke="#2186c9" stroke-width="5" stroke-linecap="round"/>
+    <line x1="1462" y1="348" x2="1462" y2="314" stroke="#2186c9" stroke-width="5" stroke-linecap="round"/>
+    <text x="1431" y="400" text-anchor="middle" class="node-title">声音特征</text>
+    <text x="1431" y="424" text-anchor="middle" class="node-sub">声音指纹</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="1000" y="512" width="214" height="106" rx="22" fill="url(#green)" stroke="#81d7a0"/>
+    <text x="1107" y="542" text-anchor="middle" class="node-title">性别识别</text>
+    <text x="1107" y="570" text-anchor="middle" class="node-sub">male / female / unknown</text>
+    <text x="1107" y="594" text-anchor="middle" class="tiny">输出置信度</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="1270" y="512" width="214" height="106" rx="22" fill="url(#yellow)" stroke="#f0c45d"/>
+    <text x="1377" y="542" text-anchor="middle" class="node-title">年龄段识别</text>
+    <text x="1377" y="570" text-anchor="middle" class="node-sub">child / teen / adult / senior</text>
+    <text x="1377" y="594" text-anchor="middle" class="tiny">输出置信度</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="1536" y="498" width="150" height="136" rx="24" fill="url(#purple)" stroke="#aa98e8"/>
+    <text x="1611" y="528" text-anchor="middle" class="node-title">用户画像</text>
+    <text x="1556" y="560" class="code">ageGroup:</text>
+    <text x="1624" y="560" class="code-green">"child"</text>
+    <text x="1556" y="588" class="code">gender:</text>
+    <text x="1618" y="588" class="code-green">"male"</text>
+    <text x="1556" y="616" class="code">conf: 0.82</text>
+  </g>
+
+  <!-- Advantages -->
+  <g filter="url(#shadow)">
+    <rect x="990" y="686" width="642" height="88" rx="24" fill="#ffe7c5" stroke="none"/>
+    <text x="1030" y="714" class="adv-title">优势1：本地部署，隐私风险低</text>
+    <text x="1030" y="744" class="adv-text">只输出年龄段、性别和置信度，适合家庭、儿童、老人等敏感场景。</text>
+  </g>
+
+  <!-- Connecting arrows left -->
+  <path d="M210 323 L270 323" fill="none" stroke="#101828" stroke-width="2.4" marker-end="url(#arrow)"/>
+  <path d="M143 360 L143 455 L270 455" fill="none" stroke="#101828" stroke-width="2.4" marker-end="url(#arrow)"/>
+  <path d="M430 319 C468 319, 454 390, 486 390" fill="none" stroke="#101828" stroke-width="2.4" marker-end="url(#arrow)"/>
+  <path d="M430 455 C468 455, 454 390, 486 390" fill="none" stroke="#101828" stroke-width="2.4" marker-end="url(#arrow)"/>
+  <path d="M666 390 L722 390" fill="none" stroke="#101828" stroke-width="2.4" marker-end="url(#arrow)"/>
+  <path d="M781 478 L781 548" fill="none" stroke="#101828" stroke-width="2.4" marker-end="url(#arrow)"/>
+  <path d="M458 642 L510 642" fill="none" stroke="#101828" stroke-width="2.4" marker-end="url(#arrow)"/>
+  <path d="M675 738 C660 766, 640 793, 610 793" fill="none" stroke="#101828" stroke-width="2.4" marker-end="url(#arrow)"/>
+
+  <!-- Connecting arrows right -->
+  <path d="M1088 333 L1150 333" fill="none" stroke="#2186c9" stroke-width="3" marker-end="url(#arrowBlue)"/>
+  <path d="M1292 333 L1354 333" fill="none" stroke="#2186c9" stroke-width="3" marker-end="url(#arrowBlue)"/>
+  <path d="M1431 374 C1431 438, 1107 438, 1107 512" fill="none" stroke="#2186c9" stroke-width="3" marker-end="url(#arrowBlue)"/>
+  <path d="M1431 374 C1431 438, 1377 438, 1377 512" fill="none" stroke="#2186c9" stroke-width="3" marker-end="url(#arrowBlue)"/>
+  <path d="M1214 565 L1270 565" fill="none" stroke="#2186c9" stroke-width="2.8" marker-end="url(#arrowBlue)"/>
+  <path d="M1484 565 L1536 565" fill="none" stroke="#2186c9" stroke-width="2.8" marker-end="url(#arrowBlue)"/>
+
+  <!-- Bridge from profile to matching -->
+  <path d="M1536 618 C1290 892, 620 872, 458 820" fill="none" stroke="#2186c9" stroke-width="2.8" stroke-dasharray="10 8" marker-end="url(#arrowBlue)" opacity=".72"/>
+  <rect x="790" y="834" width="182" height="30" rx="15" fill="#2186c9"/>
+  <text x="881" y="849" text-anchor="middle" class="pill">画像进入弱意图路由</text>
+
+  <!-- Module explanations -->
+  <g filter="url(#shadow)">
+    <rect x="34" y="832" width="846" height="224" rx="26" fill="#fff" stroke="#d6dde8"/>
+    <rect x="64" y="862" width="92" height="34" rx="17" fill="#101828"/>
+    <text x="110" y="879" text-anchor="middle" class="pill">解释</text>
+    <text x="178" y="878" class="adv-title">基于用户特征 + 场景特征的匹配链路</text>
+    <text x="70" y="920" class="adv-text">将用户语音拆解为两类显式特征：用户画像回答“谁在说”，场景归一回答“要做什么”。</text>
+    <text x="70" y="950" class="adv-text">再用问卷先验偏好矩阵完成 TOP3 召回，让 LLM 只做最后的语义裁决。</text>
+
+    <rect x="64" y="982" width="92" height="34" rx="17" fill="#f59e0b"/>
+    <text x="110" y="999" text-anchor="middle" class="pill">优势</text>
+    <text x="178" y="998" class="adv-title">数据负责“偏好召回”，LLM 负责“语义细节”</text>
+    <text x="70" y="1034" class="adv-text">降低全量 Agent 盲选压力；新增 Agent 时只需补充类型标签与能力描述，扩展成本更低。</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="910" y="832" width="816" height="224" rx="26" fill="#fff" stroke="#d6dde8"/>
+    <rect x="940" y="862" width="92" height="34" rx="17" fill="#101828"/>
+    <text x="986" y="879" text-anchor="middle" class="pill">解释</text>
+    <text x="1054" y="878" class="adv-title">多模态模型识别性别与年龄</text>
+    <text x="946" y="920" class="adv-text">对短语音片段做预处理与声音特征提取，分别输出性别、年龄段与置信度。</text>
+    <text x="946" y="950" class="adv-text">识别结果不直接决定 Agent，只作为弱意图路由中的用户特征补充。</text>
+
+    <rect x="940" y="982" width="92" height="34" rx="17" fill="#f59e0b"/>
+    <text x="986" y="999" text-anchor="middle" class="pill">优势</text>
+    <text x="1054" y="998" class="adv-title">本地部署、隐私风险低、低延迟补充画像</text>
+    <text x="946" y="1034" class="adv-text">只输出 ageGroup / gender / confidence，适合家庭、儿童、老人等敏感场景。</text>
+  </g>
+
+  <!-- Bottom summary -->
+  <g filter="url(#shadow)">
+    <rect x="300" y="1070" width="1160" height="38" rx="19" fill="#ffe7c5" stroke="none"/>
+    <text x="880" y="1089" text-anchor="middle" class="adv-title">核心价值：从“纯语义匹配”升级为“用户特征 × 场景特征 × 数据先验”的个性化匹配</text>
+  </g>
+</svg>
+</body>
+</html>
