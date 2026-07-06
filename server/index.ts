@@ -6,6 +6,7 @@ import Fastify from "fastify";
 import type { WebSocket } from "ws";
 import { agents, getAgentById } from "./agents";
 import { CozeAdapter } from "./cozeAdapter";
+import { FamilyMemory, getCurrentTimeSegment } from "./familyMemory";
 import { ManualProfileProvider } from "./profileProvider";
 import { routeAgent, routeStrongIntent } from "./router";
 import { extractSpeakerEmbedding } from "./speakerRecognition";
@@ -13,7 +14,7 @@ import { SpeakerStore } from "./speakerStore";
 import { extractReminder, TaskMemory } from "./taskMemory";
 import { UserMemory } from "./userMemory";
 import { analyzeVoiceProfile } from "./voiceProfile";
-import type { ConverseRequest, TaskFiredEvent } from "../shared/types";
+import type { ConverseRequest, FamilyRole, TaskFiredEvent, TimeSegment } from "../shared/types";
 
 const server = Fastify({ logger: true });
 const coze = new CozeAdapter();
@@ -21,6 +22,7 @@ const profiles = new ManualProfileProvider();
 const tasks = new TaskMemory();
 const speakerStore = new SpeakerStore();
 const userMemory = new UserMemory();
+const familyMemory = new FamilyMemory();
 const sockets = new Set<WebSocket>();
 
 await server.register(cors, { origin: true });
@@ -188,20 +190,32 @@ server.delete<{ Params: { userId: string } }>("/api/memory/:userId", async (requ
   memory: await userMemory.clear(request.params.userId)
 }));
 
+server.get("/api/family-memory", async () => ({
+  familyMemory: await familyMemory.getSnapshot(getCurrentTimeSegment())
+}));
+
 server.post<{ Body: ConverseRequest }>("/api/converse", async (request) => {
   const profile = await profiles.analyze({ metadata: request.body.profile });
+  const timeSegment = normalizeTimeSegment(request.body.timeSegment) ?? getCurrentTimeSegment();
+  const familyRole = normalizeFamilyRole(request.body.familyRole);
   const canUseMemory = Boolean(
     request.body.resolvedUserId
     && request.body.speakerIdentity
     && ["verified", "identified"].includes(request.body.speakerIdentity.source)
   );
-  const memoryContext = canUseMemory && request.body.resolvedUserId
+  const personalMemoryContext = canUseMemory && request.body.resolvedUserId
     ? await userMemory.formatForPrompt(request.body.resolvedUserId)
     : "";
+  const familyMemorySnapshot = await familyMemory.getSnapshot(timeSegment);
+  const familyMemoryContext = await familyMemory.formatForPrompt(request.body.resolvedUserId, timeSegment);
+  const memoryContext = [personalMemoryContext, familyMemoryContext].filter(Boolean).join("\n\n");
   const route = await routeAgent({
     ...request.body,
     lockedAgentId: request.body.lockedAgentId,
-    profile
+    profile,
+    familyRole,
+    timeSegment,
+    familyMemory: familyMemorySnapshot
   });
   const agent = getAgentById(route.agentId);
   const assistantText = await coze.generateReply({
@@ -214,7 +228,38 @@ server.post<{ Body: ConverseRequest }>("/api/converse", async (request) => {
   });
 
   const reminderDraft = extractReminder(request.body.queryText, agent.id);
-  const task = reminderDraft ? tasks.schedule(reminderDraft) : undefined;
+  const task = reminderDraft
+    ? tasks.schedule({
+      ...reminderDraft,
+      userId: request.body.resolvedUserId,
+      familyRole,
+      timeSegment
+    })
+    : undefined;
+  if (task) await familyMemory.recordReminderHabit(task);
+
+  const memory = request.body.resolvedUserId
+    ? await userMemory.writeIfAllowed({
+      userId: request.body.resolvedUserId,
+      familyRole,
+      displayName: request.body.speakerIdentity?.displayName,
+      queryText: request.body.queryText,
+      speakerIdentity: request.body.speakerIdentity,
+      memoryOptOut: request.body.memoryOptOut
+    })
+    : undefined;
+  await familyMemory.writeSharedIfAllowed({
+    queryText: request.body.queryText,
+    speakerIdentity: request.body.speakerIdentity,
+    memoryOptOut: request.body.memoryOptOut
+  });
+  const updatedFamilyMemory = await familyMemory.recordAgentUse({
+    userId: request.body.resolvedUserId,
+    displayName: request.body.speakerIdentity?.displayName,
+    familyRole,
+    agentId: agent.id,
+    memoryCount: (memory?.facts.length ?? 0) + (memory?.preferences.length ?? 0)
+  });
 
   return {
     agent,
@@ -222,14 +267,9 @@ server.post<{ Body: ConverseRequest }>("/api/converse", async (request) => {
     assistantText,
     task,
     speakerIdentity: request.body.speakerIdentity,
-    memory: request.body.resolvedUserId
-      ? await userMemory.writeIfAllowed({
-        userId: request.body.resolvedUserId,
-        queryText: request.body.queryText,
-        speakerIdentity: request.body.speakerIdentity,
-        memoryOptOut: request.body.memoryOptOut
-      })
-      : undefined
+    memory,
+    familyMemory: updatedFamilyMemory,
+    timeSegment
   };
 });
 
@@ -269,4 +309,12 @@ server.listen({ port, host: "0.0.0.0" }).catch((error) => {
 function formFieldValue(fields: unknown, key: string): string | undefined {
   const field = (fields as Record<string, { value?: unknown } | undefined> | undefined)?.[key];
   return typeof field?.value === "string" ? field.value.trim() || undefined : undefined;
+}
+
+function normalizeFamilyRole(role?: FamilyRole): FamilyRole {
+  return role && ["father", "mother", "child", "elder", "guest", "unknown"].includes(role) ? role : "unknown";
+}
+
+function normalizeTimeSegment(segment?: TimeSegment): TimeSegment | undefined {
+  return segment && ["morning", "noon", "afternoon", "evening", "night"].includes(segment) ? segment : undefined;
 }

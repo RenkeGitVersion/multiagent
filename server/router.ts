@@ -183,6 +183,9 @@ function buildRouterPayload(input: RouteInput) {
   return {
     queryText: input.queryText,
     profile: input.profile,
+    familyRole: input.familyRole,
+    timeSegment: input.timeSegment,
+    familyMemory: input.familyMemory,
     currentAgentId: input.currentAgentId,
     agents: agents.map((agent) => ({
       id: agent.id,
@@ -224,6 +227,7 @@ function scoreAgent(agent: AgentConfig, input: RouteInput): number {
   if (agent.targetGenders.includes(input.profile.gender) || agent.targetGenders.includes("unknown")) {
     score += 0.4;
   }
+  score += scoreFamilyContext(agent, input);
 
   for (const scene of agent.serviceScenes) {
     const keywords = sceneKeywords[scene] ?? [scene];
@@ -249,4 +253,25 @@ function buildWeakReason(agent: AgentConfig, queryText: string): string {
     return `根据 query 场景「${matchedScenes.join("、")}」和用户画像选择 ${agent.displayName}`;
   }
   return `未命中强意图，按用户画像和默认优先级选择 ${agent.displayName}`;
+}
+
+function scoreFamilyContext(agent: AgentConfig, input: RouteInput): number {
+  let score = 0;
+  const query = input.queryText;
+
+  if (input.familyRole === "child" && agent.id === "little-fox") score += 0.9;
+  if (["father", "mother", "elder"].includes(input.familyRole ?? "") && agent.id === "life-butler") score += 0.35;
+  if (input.timeSegment === "night" && /(睡前|哄睡|故事|晚安)/.test(query) && agent.id === "little-fox") score += 1.4;
+  if (input.timeSegment === "morning" && /(安排|计划|提醒|日程|今天)/.test(query) && agent.id === "life-butler") score += 0.9;
+  if (input.timeSegment === "evening" && /(作业|复习|学习|英语)/.test(query) && agent.id === "study-coach") score += 0.7;
+
+  const currentUserFavorite = input.familyMemory?.members
+    .find((member) => member.userId && member.familyRole === input.familyRole)
+    ?.favoriteAgents[0];
+  if (currentUserFavorite?.agentId === agent.id) score += Math.min(0.6, currentUserFavorite.count * 0.08);
+
+  const familyFavorite = input.familyMemory?.agentUsage[0];
+  if (familyFavorite?.agentId === agent.id) score += Math.min(0.35, familyFavorite.count * 0.04);
+
+  return score;
 }

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import type { AgentConfig, ChatMessage, ConverseResponse, Gender, RouteOutput, SpeakerIdentity, SpeakerUserSummary, TaskFiredEvent, UserMemorySnapshot, UserProfile, VoiceProfileResult } from "../shared/types";
+import type { AgentConfig, ChatMessage, ConverseResponse, FamilyMemorySnapshot, FamilyRole, Gender, RouteOutput, SpeakerIdentity, SpeakerUserSummary, TaskFiredEvent, TimeSegment, UserMemorySnapshot, UserProfile, VoiceProfileResult } from "../shared/types";
 import "./styles.css";
 
 const apiBase = import.meta.env.VITE_API_BASE ?? "http://localhost:8787";
@@ -32,6 +32,9 @@ function App() {
   const [isIdentifying, setIsIdentifying] = useState(false);
   const [isRegisteringSpeaker, setIsRegisteringSpeaker] = useState(false);
   const [memory, setMemory] = useState<UserMemorySnapshot | null>(null);
+  const [familyMemory, setFamilyMemory] = useState<FamilyMemorySnapshot | null>(null);
+  const [familyRole, setFamilyRole] = useState<FamilyRole>("unknown");
+  const [timeSegment, setTimeSegment] = useState<TimeSegment>(currentTimeSegment());
   const [memoryOptOut, setMemoryOptOut] = useState(false);
   const [routeResult, setRouteResult] = useState<(RouteOutput & { agentName: string }) | null>(null);
   const [status, setStatus] = useState("准备就绪");
@@ -69,6 +72,7 @@ function App() {
       })
       .catch(() => setStatus("无法连接后端服务"));
     void refreshSpeakerUsers();
+    void refreshFamilyMemory();
   }, []);
 
   async function refreshSpeakerUsers() {
@@ -79,6 +83,17 @@ function App() {
       setClaimedUserId((current) => current || data.users.find((user) => user.centroidReady && user.status === "active")?.userId || "");
     } catch {
       setRegisteredUsers([]);
+    }
+  }
+
+  async function refreshFamilyMemory() {
+    try {
+      const response = await fetch(`${apiBase}/api/family-memory`);
+      const data = (await response.json()) as { familyMemory: FamilyMemorySnapshot };
+      setFamilyMemory(data.familyMemory);
+      setTimeSegment(data.familyMemory.currentTimeSegment);
+    } catch {
+      setFamilyMemory(null);
     }
   }
 
@@ -279,6 +294,8 @@ function App() {
           resolvedUserId: resolvedSpeaker.userId,
           speakerIdentity: resolvedSpeaker,
           memoryOptOut,
+          familyRole,
+          timeSegment,
           profile: routedProfile,
           conversationContext: messages
         })
@@ -287,6 +304,8 @@ function App() {
       setCurrentAgent(data.agent);
       setSpeakerIdentity(data.speakerIdentity ?? resolvedSpeaker);
       setMemory(data.memory ?? null);
+      setFamilyMemory(data.familyMemory ?? familyMemory);
+      if (data.timeSegment) setTimeSegment(data.timeSegment);
       setRouteResult(lockedAgentId ? null : { ...data.route, agentName: data.agent.displayName });
       appendMessage("assistant", data.assistantText, data.agent.id);
       setStatus(`${data.agent.displayName} 已生成回复，正在合成语音`);
@@ -718,6 +737,27 @@ function App() {
             </select>
           </label>
           <label>
+            家庭角色
+            <select value={familyRole} onChange={(event) => setFamilyRole(event.target.value as FamilyRole)}>
+              <option value="unknown">未知</option>
+              <option value="father">爸爸</option>
+              <option value="mother">妈妈</option>
+              <option value="child">孩子</option>
+              <option value="elder">长辈</option>
+              <option value="guest">访客</option>
+            </select>
+          </label>
+          <label>
+            时间段
+            <select value={timeSegment} onChange={(event) => setTimeSegment(event.target.value as TimeSegment)}>
+              <option value="morning">早上</option>
+              <option value="noon">中午</option>
+              <option value="afternoon">下午</option>
+              <option value="evening">晚上</option>
+              <option value="night">夜间</option>
+            </select>
+          </label>
+          <label>
             昵称
             <input value={speakerDisplayName} onChange={(event) => setSpeakerDisplayName(event.target.value)} placeholder="用于显示的用户昵称" />
           </label>
@@ -808,6 +848,10 @@ function App() {
               </button>
             </div>
           </section>
+          <section className="memory-panel">
+            <h2>家庭记忆</h2>
+            {renderFamilyMemory(familyMemory, agents)}
+          </section>
         </div>
       </section>
     </main>
@@ -875,12 +919,37 @@ function renderMemory(memory: UserMemorySnapshot | null, identity: SpeakerIdenti
   }
   return (
     <div className="memory-list">
-      <p>当前用户：{identity.displayName || identity.userId}</p>
+      <p>当前用户：{identity.displayName || identity.userId} · {familyRoleLabel(memory.familyRole)}</p>
       {memory.preferences.map((item) => (
         <span key={item.key}>偏好：{item.key} = {item.value}</span>
       ))}
       {memory.facts.map((item) => (
         <span key={item.id}>事实：{item.text}</span>
+      ))}
+    </div>
+  );
+}
+
+function renderFamilyMemory(memory: FamilyMemorySnapshot | null, agents: AgentConfig[]) {
+  if (!memory) return <p className="empty">暂无家庭记忆。完成一次对话后会自动生成家庭画像。</p>;
+  const agentName = (agentId: string) => agents.find((agent) => agent.id === agentId)?.displayName ?? agentId;
+  return (
+    <div className="memory-list">
+      <p>当前时间段：{timeSegmentLabel(memory.currentTimeSegment)}</p>
+      {memory.members.slice(0, 4).map((member) => (
+        <span key={member.userId}>
+          成员：{member.displayName || member.userId} · {familyRoleLabel(member.familyRole)}
+          {member.favoriteAgents[0] ? ` · 常用 ${agentName(member.favoriteAgents[0].agentId)} ${member.favoriteAgents[0].count} 次` : ""}
+        </span>
+      ))}
+      {memory.agentUsage.slice(0, 3).map((item) => (
+        <span key={item.agentId}>家庭常用智能体：{agentName(item.agentId)} · {item.count} 次</span>
+      ))}
+      {memory.reminderHabits.slice(0, 3).map((item) => (
+        <span key={item.id}>提醒习惯：{familyRoleLabel(item.familyRole)} · {timeSegmentLabel(item.timeSegment)} · {item.message}</span>
+      ))}
+      {memory.sharedFacts.slice(0, 3).map((item) => (
+        <span key={item.id}>家庭事实：{item.text}</span>
       ))}
     </div>
   );
@@ -925,6 +994,38 @@ function routeSourceLabel(source: RouteOutput["source"]): string {
   if (source === "model") return "模型判断";
   if (source === "strong-rule") return "强意图规则";
   return "规则兜底";
+}
+
+function familyRoleLabel(role: FamilyRole) {
+  const labels: Record<FamilyRole, string> = {
+    father: "爸爸",
+    mother: "妈妈",
+    child: "孩子",
+    elder: "长辈",
+    guest: "访客",
+    unknown: "未知"
+  };
+  return labels[role];
+}
+
+function timeSegmentLabel(segment: TimeSegment) {
+  const labels: Record<TimeSegment, string> = {
+    morning: "早上",
+    noon: "中午",
+    afternoon: "下午",
+    evening: "晚上",
+    night: "夜间"
+  };
+  return labels[segment];
+}
+
+function currentTimeSegment(): TimeSegment {
+  const hour = new Date().getHours();
+  if (hour >= 5 && hour < 11) return "morning";
+  if (hour >= 11 && hour < 14) return "noon";
+  if (hour >= 14 && hour < 18) return "afternoon";
+  if (hour >= 18 && hour < 22) return "evening";
+  return "night";
 }
 
 function getClientSessionId() {

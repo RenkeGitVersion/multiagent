@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { SpeakerIdentity, UserMemorySnapshot } from "../shared/types";
+import type { FamilyRole, SpeakerIdentity, UserMemorySnapshot } from "../shared/types";
 
 const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const dataDir = join(projectRoot, "server", ".data");
@@ -26,6 +26,8 @@ interface MemoryPreference {
 
 interface UserMemoryRecord {
   userId: string;
+  familyRole: FamilyRole;
+  displayName?: string;
   facts: MemoryFact[];
   preferences: MemoryPreference[];
   recentSummaries: Array<{
@@ -56,6 +58,8 @@ export class UserMemory {
   async formatForPrompt(userId: string): Promise<string> {
     const snapshot = await this.getSnapshot(userId);
     const lines = [
+      `家庭角色：${familyRoleLabel(snapshot.familyRole)}`,
+      ...(snapshot.displayName ? [`称呼：${snapshot.displayName}`] : []),
       ...snapshot.preferences.map((item) => `偏好：${item.key} = ${item.value}`),
       ...snapshot.facts.map((item) => `事实：${item.text}`)
     ];
@@ -114,6 +118,8 @@ export class UserMemory {
 
   async writeIfAllowed(input: {
     userId?: string;
+    familyRole?: FamilyRole;
+    displayName?: string;
     queryText: string;
     speakerIdentity?: SpeakerIdentity;
     memoryOptOut?: boolean;
@@ -129,6 +135,8 @@ export class UserMemory {
     const data = await this.read();
     const record = getOrCreateRecord(data, input.userId);
     const now = new Date().toISOString();
+    if (input.familyRole) record.familyRole = input.familyRole;
+    if (input.displayName?.trim()) record.displayName = input.displayName.trim();
 
     if (candidate.kind === "preference" && candidate.key && candidate.value) {
       const existing = record.preferences.find((item) => item.key === candidate.key);
@@ -182,6 +190,8 @@ export class UserMemory {
   private toSnapshot(record: UserMemoryRecord): UserMemorySnapshot {
     return {
       userId: record.userId,
+      familyRole: record.familyRole,
+      displayName: record.displayName,
       facts: record.facts.map((item) => ({
         id: item.id,
         text: item.text,
@@ -225,6 +235,7 @@ function getOrCreateRecord(data: UserMemoryFile, userId: string): UserMemoryReco
 function createRecord(userId: string): UserMemoryRecord {
   return {
     userId,
+    familyRole: "unknown",
     facts: [],
     preferences: [],
     recentSummaries: []
@@ -234,4 +245,16 @@ function createRecord(userId: string): UserMemoryRecord {
 function envNumber(name: string, fallback: number): number {
   const value = Number(process.env[name]);
   return Number.isFinite(value) ? value : fallback;
+}
+
+function familyRoleLabel(role: FamilyRole): string {
+  const labels: Record<FamilyRole, string> = {
+    father: "爸爸",
+    mother: "妈妈",
+    child: "孩子",
+    elder: "长辈",
+    guest: "访客",
+    unknown: "未知"
+  };
+  return labels[role];
 }
