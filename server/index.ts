@@ -115,6 +115,7 @@ server.post("/api/speaker/register", async (request, reply) => {
   return speakerStore.registerSample({
     userId: formFieldValue(audio.fields, "userId"),
     displayName: formFieldValue(audio.fields, "displayName"),
+    familyRole: normalizeFamilyRole(formFieldValue(audio.fields, "familyRole") as FamilyRole | undefined),
     embeddingResult
   });
 });
@@ -197,7 +198,7 @@ server.get("/api/family-memory", async () => ({
 server.post<{ Body: ConverseRequest }>("/api/converse", async (request) => {
   const profile = await profiles.analyze({ metadata: request.body.profile });
   const timeSegment = normalizeTimeSegment(request.body.timeSegment) ?? getCurrentTimeSegment();
-  const familyRole = normalizeFamilyRole(request.body.familyRole);
+  const familyRole = normalizeFamilyRole(request.body.speakerIdentity?.familyRole);
   const canUseMemory = Boolean(
     request.body.resolvedUserId
     && request.body.speakerIdentity

@@ -33,6 +33,7 @@ export interface VoiceQuality {
 export interface SpeakerIdentity {
   userId?: string;
   displayName?: string;
+  familyRole?: FamilyRole;
   source: "verified" | "identified" | "manual" | "unknown" | "failed";
   confidence: number;
   similarity?: number;
@@ -45,6 +46,7 @@ export interface SpeakerIdentity {
 export interface SpeakerUserSummary {
   userId: string;
   displayName?: string;
+  familyRole: FamilyRole;
   sampleCount: number;
   centroidReady: boolean;
   status: "active" | "disabled";
@@ -55,6 +57,7 @@ export interface SpeakerUserSummary {
 export interface SpeakerRegisterResponse {
   userId: string;
   displayName?: string;
+  familyRole: FamilyRole;
   sampleCount: number;
   quality: VoiceQuality;
   centroidReady: boolean;
@@ -187,7 +190,6 @@ export interface ConverseRequest {
   resolvedUserId?: string;
   speakerIdentity?: SpeakerIdentity;
   memoryOptOut?: boolean;
-  familyRole?: FamilyRole;
   timeSegment?: TimeSegment;
   profile: UserProfile;
   conversationContext: ChatMessage[];

@@ -80,7 +80,9 @@ function App() {
       const response = await fetch(`${apiBase}/api/speaker/users`);
       const data = (await response.json()) as { users: SpeakerUserSummary[] };
       setRegisteredUsers(data.users);
-      setClaimedUserId((current) => current || data.users.find((user) => user.centroidReady && user.status === "active")?.userId || "");
+      const firstReadyUser = data.users.find((user) => user.centroidReady && user.status === "active");
+      setClaimedUserId((current) => current || firstReadyUser?.userId || "");
+      if (firstReadyUser && !claimedUserId) setFamilyRole(firstReadyUser.familyRole);
     } catch {
       setRegisteredUsers([]);
     }
@@ -294,7 +296,6 @@ function App() {
           resolvedUserId: resolvedSpeaker.userId,
           speakerIdentity: resolvedSpeaker,
           memoryOptOut,
-          familyRole,
           timeSegment,
           profile: routedProfile,
           conversationContext: messages
@@ -480,9 +481,11 @@ function App() {
   async function resolveSpeakerIdentity(signal: AbortSignal): Promise<SpeakerIdentity> {
     const audio = latestAudioRef.current;
     if (!audio || audio.size === 0) {
+      const selectedUser = registeredUsers.find((user) => user.userId === claimedUserId);
       const manualIdentity: SpeakerIdentity = {
         userId: claimedUserId || undefined,
-        displayName: registeredUsers.find((user) => user.userId === claimedUserId)?.displayName,
+        displayName: selectedUser?.displayName,
+        familyRole: selectedUser?.familyRole,
         source: claimedUserId ? "manual" : "unknown",
         confidence: claimedUserId ? 0.5 : 0,
         reason: claimedUserId ? "无录音，使用手动选择用户，本轮不自动写入长期记忆" : "无录音，无法确认声纹身份"
@@ -507,6 +510,7 @@ function App() {
       setSpeakerIdentity(result);
       if (result.userId) {
         setClaimedUserId(result.userId);
+        setFamilyRole(result.familyRole ?? "unknown");
         const memoryResponse = await fetch(`${apiBase}/api/memory/${encodeURIComponent(result.userId)}`, { signal });
         const memoryData = (await memoryResponse.json()) as { memory: UserMemorySnapshot };
         setMemory(memoryData.memory);
@@ -543,12 +547,14 @@ function App() {
       form.append("audio", audio, "speaker-register.webm");
       if (claimedUserId) form.append("userId", claimedUserId);
       if (speakerDisplayName.trim()) form.append("displayName", speakerDisplayName.trim());
+      form.append("familyRole", familyRole);
       const response = await fetch(`${apiBase}/api/speaker/register`, {
         method: "POST",
         body: form
       });
-      const result = await response.json() as { userId: string; displayName?: string; sampleCount: number; centroidReady: boolean; message: string };
+      const result = await response.json() as { userId: string; displayName?: string; familyRole: FamilyRole; sampleCount: number; centroidReady: boolean; message: string };
       setClaimedUserId(result.userId);
+      setFamilyRole(result.familyRole);
       if (result.displayName) setSpeakerDisplayName(result.displayName);
       setStatus(result.message);
       await refreshSpeakerUsers();
@@ -690,6 +696,12 @@ function App() {
     return registeredUsers.find((user) => user.userId === claimedUserId);
   }
 
+  function changeClaimedUser(userId: string) {
+    setClaimedUserId(userId);
+    const user = registeredUsers.find((item) => item.userId === userId);
+    if (user) setFamilyRole(user.familyRole);
+  }
+
   return (
     <main className="app-shell">
       <section className="stage">
@@ -727,17 +739,17 @@ function App() {
           </label>
           <label>
             声纹用户
-            <select value={claimedUserId} onChange={(event) => setClaimedUserId(event.target.value)}>
+            <select value={claimedUserId} onChange={(event) => changeClaimedUser(event.target.value)}>
               <option value="">自动识别</option>
               {registeredUsers.map((user) => (
                 <option key={user.userId} value={user.userId}>
-                  {user.displayName || user.userId}{user.centroidReady ? "" : "（未完成）"}
+                  {user.displayName || user.userId} · {familyRoleLabel(user.familyRole)}{user.centroidReady ? "" : "（未完成）"}
                 </option>
               ))}
             </select>
           </label>
           <label>
-            家庭角色
+            注册绑定角色
             <select value={familyRole} onChange={(event) => setFamilyRole(event.target.value as FamilyRole)}>
               <option value="unknown">未知</option>
               <option value="father">爸爸</option>
@@ -897,7 +909,7 @@ function renderSpeakerIdentity(result: SpeakerIdentity | null) {
     return (
       <>
         <strong>{result.displayName || result.userId}</strong>
-        <strong>{identitySourceLabel(result.source)}{similarity}</strong>
+        <strong>{identitySourceLabel(result.source)} · {familyRoleLabel(result.familyRole ?? "unknown")}{similarity}</strong>
         <span>{result.reason}</span>
       </>
     );

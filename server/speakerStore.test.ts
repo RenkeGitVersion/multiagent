@@ -60,16 +60,18 @@ assert.equal(Math.round(centroid[0] * 1000) / 1000, 1);
 
 await withIsolatedStore(async () => {
   const store = new SpeakerStore();
-  let result = await store.registerSample({ userId: "user_a", displayName: "用户A", embeddingResult: embedding([1, 0, 0]) });
+  let result = await store.registerSample({ userId: "user_a", displayName: "用户A", familyRole: "father", embeddingResult: embedding([1, 0, 0]) });
   assert.equal(result.centroidReady, false);
-  result = await store.registerSample({ userId: "user_a", displayName: "用户A", embeddingResult: embedding([0.98, 0.1, 0]) });
+  assert.equal(result.familyRole, "father");
+  result = await store.registerSample({ userId: "user_a", displayName: "用户A", familyRole: "father", embeddingResult: embedding([0.98, 0.1, 0]) });
   assert.equal(result.centroidReady, false);
-  result = await store.registerSample({ userId: "user_a", displayName: "用户A", embeddingResult: embedding([0.99, -0.05, 0]) });
+  result = await store.registerSample({ userId: "user_a", displayName: "用户A", familyRole: "father", embeddingResult: embedding([0.99, -0.05, 0]) });
   assert.equal(result.centroidReady, true);
 
   const verified = await store.verify("user_a", embedding([0.99, 0.02, 0]));
   assert.equal(verified.source, "verified");
   assert.equal(verified.userId, "user_a");
+  assert.equal(verified.familyRole, "father");
 
   const rejected = await store.verify("user_a", embedding([0, 1, 0]));
   assert.equal(rejected.source, "unknown");
@@ -77,6 +79,7 @@ await withIsolatedStore(async () => {
   const identified = await store.identify(embedding([0.99, 0.01, 0]));
   assert.equal(identified.source, "identified");
   assert.equal(identified.userId, "user_a");
+  assert.equal(identified.familyRole, "father");
 
   const lowQuality = await store.identify(embedding([1, 0, 0], { ...okQuality, ok: false, reasons: ["too_short"] }));
   assert.equal(lowQuality.source, "failed");

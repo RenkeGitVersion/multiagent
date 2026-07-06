@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { SpeakerIdentity, SpeakerRegisterResponse, SpeakerUserSummary, VoiceQuality } from "../shared/types";
+import type { FamilyRole, SpeakerIdentity, SpeakerRegisterResponse, SpeakerUserSummary, VoiceQuality } from "../shared/types";
 import type { SpeakerEmbeddingResult } from "./speakerRecognition";
 
 const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -20,6 +20,7 @@ interface SpeakerSample {
 interface SpeakerProfile {
   userId: string;
   displayName?: string;
+  familyRole: FamilyRole;
   centroid: number[];
   sampleCount: number;
   embeddingDim: number;
@@ -50,6 +51,7 @@ export class SpeakerStore {
   async registerSample(input: {
     userId?: string;
     displayName?: string;
+    familyRole?: FamilyRole;
     embeddingResult: SpeakerEmbeddingResult;
   }): Promise<SpeakerRegisterResponse> {
     const data = await this.read();
@@ -61,6 +63,7 @@ export class SpeakerStore {
       return {
         userId,
         displayName: input.displayName,
+        familyRole: normalizeFamilyRole(input.familyRole),
         sampleCount: data.profiles.find((item) => item.userId === userId)?.sampleCount ?? 0,
         quality,
         centroidReady: false,
@@ -73,6 +76,7 @@ export class SpeakerStore {
       profile = {
         userId,
         displayName: input.displayName?.trim() || undefined,
+        familyRole: normalizeFamilyRole(input.familyRole),
         centroid: [],
         sampleCount: 0,
         embeddingDim: input.embeddingResult.embeddingDim,
@@ -87,6 +91,7 @@ export class SpeakerStore {
     }
 
     if (input.displayName?.trim()) profile.displayName = input.displayName.trim();
+    if (input.familyRole) profile.familyRole = normalizeFamilyRole(input.familyRole);
     const normalized = l2Normalize(input.embeddingResult.embedding);
     const similarityToCentroid = profile.centroid.length > 0 ? cosineSimilarity(normalized, profile.centroid) : 1;
     const minAppendSimilarity = envNumber("SPEAKER_ENROLL_MIN_SIMILARITY", 0.72);
@@ -95,6 +100,7 @@ export class SpeakerStore {
       return {
         userId,
         displayName: profile.displayName,
+        familyRole: profile.familyRole,
         sampleCount: profile.sampleCount,
         quality,
         centroidReady: profile.sampleCount >= 3,
@@ -120,6 +126,7 @@ export class SpeakerStore {
     return {
       userId,
       displayName: profile.displayName,
+      familyRole: profile.familyRole,
       sampleCount: profile.sampleCount,
       quality,
       centroidReady: profile.sampleCount >= 3,
@@ -142,6 +149,7 @@ export class SpeakerStore {
     return {
       userId: verified ? profile.userId : undefined,
       displayName: verified ? profile.displayName : undefined,
+      familyRole: verified ? profile.familyRole : undefined,
       source: verified ? "verified" : "unknown",
       confidence: similarity,
       similarity,
@@ -200,6 +208,7 @@ export class SpeakerStore {
     return {
       userId: best.profile.userId,
       displayName: best.profile.displayName,
+      familyRole: best.profile.familyRole,
       source: "identified",
       confidence: best.similarity,
       similarity: best.similarity,
@@ -285,6 +294,7 @@ export class SpeakerStore {
     return {
       userId: profile.userId,
       displayName: profile.displayName,
+      familyRole: profile.familyRole,
       sampleCount: profile.sampleCount,
       centroidReady: profile.sampleCount >= 3 && profile.centroid.length > 0,
       status: profile.status,
@@ -297,7 +307,12 @@ export class SpeakerStore {
     try {
       const raw = await readFile(storePath, "utf8");
       const parsed = JSON.parse(raw) as SpeakerStoreFile;
-      return { profiles: parsed.profiles ?? [] };
+      return {
+        profiles: (parsed.profiles ?? []).map((profile) => ({
+          ...profile,
+          familyRole: normalizeFamilyRole(profile.familyRole)
+        }))
+      };
     } catch {
       return { profiles: [] };
     }
@@ -341,6 +356,10 @@ export function l2Normalize(values: number[]): number[] {
 function sanitizeUserId(userId?: string): string | undefined {
   const safe = userId?.trim().replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 48);
   return safe || undefined;
+}
+
+function normalizeFamilyRole(role?: FamilyRole): FamilyRole {
+  return role && ["father", "mother", "child", "elder", "guest", "unknown"].includes(role) ? role : "unknown";
 }
 
 function envNumber(name: string, fallback: number): number {
