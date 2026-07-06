@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import type { AgentConfig, ChatMessage, ConverseResponse, Gender, RouteOutput, TaskFiredEvent, UserProfile, VoiceProfileResult } from "../shared/types";
+import type { AgentConfig, ChatMessage, ConverseResponse, Gender, RouteOutput, SpeakerIdentity, SpeakerUserSummary, TaskFiredEvent, UserMemorySnapshot, UserProfile, VoiceProfileResult } from "../shared/types";
 import "./styles.css";
 
 const apiBase = import.meta.env.VITE_API_BASE ?? "http://localhost:8787";
@@ -25,6 +25,14 @@ function App() {
   const [isSending, setIsSending] = useState(false);
   const [isProfiling, setIsProfiling] = useState(false);
   const [voiceProfile, setVoiceProfile] = useState<VoiceProfileResult | null>(null);
+  const [speakerIdentity, setSpeakerIdentity] = useState<SpeakerIdentity | null>(null);
+  const [registeredUsers, setRegisteredUsers] = useState<SpeakerUserSummary[]>([]);
+  const [claimedUserId, setClaimedUserId] = useState<string>("");
+  const [speakerDisplayName, setSpeakerDisplayName] = useState("");
+  const [isIdentifying, setIsIdentifying] = useState(false);
+  const [isRegisteringSpeaker, setIsRegisteringSpeaker] = useState(false);
+  const [memory, setMemory] = useState<UserMemorySnapshot | null>(null);
+  const [memoryOptOut, setMemoryOptOut] = useState(false);
   const [routeResult, setRouteResult] = useState<(RouteOutput & { agentName: string }) | null>(null);
   const [status, setStatus] = useState("准备就绪");
   const recognitionRef = useRef<SpeechRecognition | null>(null);
@@ -60,7 +68,19 @@ function App() {
         setCurrentAgent(data.agents[0]);
       })
       .catch(() => setStatus("无法连接后端服务"));
+    void refreshSpeakerUsers();
   }, []);
+
+  async function refreshSpeakerUsers() {
+    try {
+      const response = await fetch(`${apiBase}/api/speaker/users`);
+      const data = (await response.json()) as { users: SpeakerUserSummary[] };
+      setRegisteredUsers(data.users);
+      setClaimedUserId((current) => current || data.users.find((user) => user.centroidReady && user.status === "active")?.userId || "");
+    } catch {
+      setRegisteredUsers([]);
+    }
+  }
 
   useEffect(() => {
     const ws = new WebSocket(websocketUrl);
@@ -243,6 +263,8 @@ function App() {
       const abortController = new AbortController();
       requestAbortRef.current = abortController;
       const hasStrongRoute = Boolean(localStrongAgent);
+      await waitForAudioReady();
+      const resolvedSpeaker = await resolveSpeakerIdentity(abortController.signal);
       const routedProfile = hasStrongRoute || lockedAgentId ? skipVoiceProfile(lockedAgentId ? "session-lock" : "strong") : await resolveVoiceProfile(abortController.signal);
       setStatus(lockedAgentId ? `继续由 ${agentNameById(lockedAgentId)} 回答` : "正在路由智能体");
       const response = await fetch(`${apiBase}/api/converse`, {
@@ -254,12 +276,17 @@ function App() {
           currentAgentId: currentAgent?.id,
           lockedAgentId,
           clientSessionId: clientSessionIdRef.current,
+          resolvedUserId: resolvedSpeaker.userId,
+          speakerIdentity: resolvedSpeaker,
+          memoryOptOut,
           profile: routedProfile,
           conversationContext: messages
         })
       });
       const data = (await response.json()) as ConverseResponse;
       setCurrentAgent(data.agent);
+      setSpeakerIdentity(data.speakerIdentity ?? resolvedSpeaker);
+      setMemory(data.memory ?? null);
       setRouteResult(lockedAgentId ? null : { ...data.route, agentName: data.agent.displayName });
       appendMessage("assistant", data.assistantText, data.agent.id);
       setStatus(`${data.agent.displayName} 已生成回复，正在合成语音`);
@@ -431,6 +458,106 @@ function App() {
     });
   }
 
+  async function resolveSpeakerIdentity(signal: AbortSignal): Promise<SpeakerIdentity> {
+    const audio = latestAudioRef.current;
+    if (!audio || audio.size === 0) {
+      const manualIdentity: SpeakerIdentity = {
+        userId: claimedUserId || undefined,
+        displayName: registeredUsers.find((user) => user.userId === claimedUserId)?.displayName,
+        source: claimedUserId ? "manual" : "unknown",
+        confidence: claimedUserId ? 0.5 : 0,
+        reason: claimedUserId ? "无录音，使用手动选择用户，本轮不自动写入长期记忆" : "无录音，无法确认声纹身份"
+      };
+      setSpeakerIdentity(manualIdentity);
+      return manualIdentity;
+    }
+
+    setIsIdentifying(true);
+    setStatus("正在识别声纹身份");
+    try {
+      const form = new FormData();
+      form.append("audio", audio, "speaker.webm");
+      if (claimedUserId) form.append("claimedUserId", claimedUserId);
+      form.append("assistantPlaybackRecentlyEnded", String(Date.now() - lastAssistantAudioEndedAtRef.current < 5000));
+      const response = await fetch(`${apiBase}/api/speaker/resolve`, {
+        method: "POST",
+        body: form,
+        signal
+      });
+      const result = (await response.json()) as SpeakerIdentity;
+      setSpeakerIdentity(result);
+      if (result.userId) {
+        setClaimedUserId(result.userId);
+        const memoryResponse = await fetch(`${apiBase}/api/memory/${encodeURIComponent(result.userId)}`, { signal });
+        const memoryData = (await memoryResponse.json()) as { memory: UserMemorySnapshot };
+        setMemory(memoryData.memory);
+      } else {
+        setMemory(null);
+      }
+      return result;
+    } catch {
+      const failed: SpeakerIdentity = {
+        source: "failed",
+        confidence: 0,
+        reason: "声纹身份识别失败，本轮不写入长期记忆"
+      };
+      setSpeakerIdentity(failed);
+      return failed;
+    } finally {
+      setIsIdentifying(false);
+    }
+  }
+
+  async function registerSpeakerSample() {
+    if (isRegisteringSpeaker || isListening || isSending) return;
+    setIsRegisteringSpeaker(true);
+    setStatus("正在录制声纹注册样本，请连续说话 3 秒");
+    try {
+      await startAudioCapture();
+      await new Promise((resolve) => window.setTimeout(resolve, 3200));
+      const audio = await waitForAudioReady();
+      if (!audio || audio.size === 0) {
+        setStatus("没有录到有效声纹样本");
+        return;
+      }
+      const form = new FormData();
+      form.append("audio", audio, "speaker-register.webm");
+      if (claimedUserId) form.append("userId", claimedUserId);
+      if (speakerDisplayName.trim()) form.append("displayName", speakerDisplayName.trim());
+      const response = await fetch(`${apiBase}/api/speaker/register`, {
+        method: "POST",
+        body: form
+      });
+      const result = await response.json() as { userId: string; displayName?: string; sampleCount: number; centroidReady: boolean; message: string };
+      setClaimedUserId(result.userId);
+      if (result.displayName) setSpeakerDisplayName(result.displayName);
+      setStatus(result.message);
+      await refreshSpeakerUsers();
+    } catch {
+      setStatus("声纹注册失败，请确认后端和 Python 声纹环境可用");
+    } finally {
+      setIsRegisteringSpeaker(false);
+    }
+  }
+
+  async function clearCurrentMemory() {
+    if (!claimedUserId) return;
+    const response = await fetch(`${apiBase}/api/memory/${encodeURIComponent(claimedUserId)}`, { method: "DELETE" });
+    const data = (await response.json()) as { memory: UserMemorySnapshot };
+    setMemory(data.memory);
+    setStatus("已清除当前用户长期记忆");
+  }
+
+  async function toggleAutoImprove(enabled: boolean) {
+    if (!claimedUserId) return;
+    await fetch(`${apiBase}/api/speaker/auto-improve`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId: claimedUserId, enabled })
+    });
+    await refreshSpeakerUsers();
+  }
+
   function skipVoiceProfile(reason: "strong" | "session-lock" = "strong"): UserProfile {
     setVoiceProfile({
       ...profile,
@@ -540,6 +667,10 @@ function App() {
     window.speechSynthesis.speak(utterance);
   }
 
+  function currentSpeakerUser() {
+    return registeredUsers.find((user) => user.userId === claimedUserId);
+  }
+
   return (
     <main className="app-shell">
       <section className="stage">
@@ -575,12 +706,40 @@ function App() {
               <option value="male">男性</option>
             </select>
           </label>
+          <label>
+            声纹用户
+            <select value={claimedUserId} onChange={(event) => setClaimedUserId(event.target.value)}>
+              <option value="">自动识别</option>
+              {registeredUsers.map((user) => (
+                <option key={user.userId} value={user.userId}>
+                  {user.displayName || user.userId}{user.centroidReady ? "" : "（未完成）"}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            昵称
+            <input value={speakerDisplayName} onChange={(event) => setSpeakerDisplayName(event.target.value)} placeholder="用于显示的用户昵称" />
+          </label>
+          <button onClick={registerSpeakerSample} disabled={isRegisteringSpeaker || isListening || isSending}>
+            {isRegisteringSpeaker ? "注册录音中" : "录制注册样本"}
+          </button>
+          <label className="checkbox-label">
+            <input type="checkbox" checked={!memoryOptOut} onChange={(event) => setMemoryOptOut(!event.target.checked)} />
+            允许长期记忆
+          </label>
         </div>
 
         <div className={voiceProfile?.source === "voice" ? "profile-result detected" : "profile-result"}>
           <span>声音画像</span>
           {renderVoiceProfile(voiceProfile)}
           {isProfiling ? <em>识别中</em> : null}
+        </div>
+
+        <div className={speakerIdentity?.userId ? "identity-result detected" : "identity-result"}>
+          <span>声纹身份</span>
+          {renderSpeakerIdentity(speakerIdentity)}
+          {isIdentifying ? <em>识别中</em> : null}
         </div>
 
         <div className={routeResult ? "route-result detected" : "route-result"}>
@@ -636,6 +795,19 @@ function App() {
               </span>
             </button>
           ))}
+          <section className="memory-panel">
+            <h2>长期记忆</h2>
+            {renderMemory(memory, speakerIdentity)}
+            <div className="memory-actions">
+              <button onClick={clearCurrentMemory} disabled={!claimedUserId}>清除当前记忆</button>
+              <button
+                onClick={() => toggleAutoImprove(!currentSpeakerUser()?.autoImproveVoiceprint)}
+                disabled={!claimedUserId}
+              >
+                {currentSpeakerUser()?.autoImproveVoiceprint === false ? "开启声纹优化" : "关闭声纹优化"}
+              </button>
+            </div>
+          </section>
         </div>
       </section>
     </main>
@@ -671,6 +843,68 @@ function renderVoiceProfile(result: VoiceProfileResult | null) {
       <strong>耗时：{result.totalSeconds.toFixed(2)}s</strong>
     </>
   );
+}
+
+function renderSpeakerIdentity(result: SpeakerIdentity | null) {
+  if (!result) return <strong>未注册或未识别声纹</strong>;
+  const similarity = typeof result.similarity === "number" ? ` · 相似度 ${Math.round(result.similarity * 100)}%` : "";
+  const qualityReasons = result.quality?.reasons?.length ? ` · ${qualityReasonLabel(result.quality.reasons)}` : "";
+  if (result.userId) {
+    return (
+      <>
+        <strong>{result.displayName || result.userId}</strong>
+        <strong>{identitySourceLabel(result.source)}{similarity}</strong>
+        <span>{result.reason}</span>
+      </>
+    );
+  }
+  return (
+    <>
+      <strong>{identitySourceLabel(result.source)}</strong>
+      <span>{result.reason ?? "未确认身份，本轮不读取或写入私人长期记忆"}{qualityReasons}</span>
+    </>
+  );
+}
+
+function renderMemory(memory: UserMemorySnapshot | null, identity: SpeakerIdentity | null) {
+  if (!identity?.userId) {
+    return <p className="empty">未确认用户身份，本轮不会读取或写入私人长期记忆。</p>;
+  }
+  if (!memory || (memory.facts.length === 0 && memory.preferences.length === 0)) {
+    return <p className="empty">当前用户暂无长期记忆。说“记住我喜欢……”可写入显式记忆。</p>;
+  }
+  return (
+    <div className="memory-list">
+      <p>当前用户：{identity.displayName || identity.userId}</p>
+      {memory.preferences.map((item) => (
+        <span key={item.key}>偏好：{item.key} = {item.value}</span>
+      ))}
+      {memory.facts.map((item) => (
+        <span key={item.id}>事实：{item.text}</span>
+      ))}
+    </div>
+  );
+}
+
+function identitySourceLabel(source: SpeakerIdentity["source"]) {
+  if (source === "verified") return "验证通过";
+  if (source === "identified") return "识别成功";
+  if (source === "manual") return "手动选择";
+  if (source === "failed") return "识别失败";
+  return "未确认身份";
+}
+
+function qualityReasonLabel(reasons: string[]) {
+  const labels: Record<string, string> = {
+    too_short: "语音太短",
+    too_quiet: "音量太低",
+    too_much_silence: "静音过多",
+    clipped: "爆音或削波",
+    no_speech_detected: "有效人声不足",
+    invalid_sample_rate: "采样率异常",
+    model_failed: "模型推理失败"
+  };
+  return reasons.map((reason) => labels[reason] ?? reason).join("、");
 }
 
 function renderRouteResult(result: (RouteOutput & { agentName: string }) | null) {

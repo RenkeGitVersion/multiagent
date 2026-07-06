@@ -109,3 +109,48 @@ python3.11 -m venv .venv-age
 默认模型是 `audeering/wav2vec2-large-robust-6-ft-age-gender`，输入要求为 16 kHz WAV。首次运行会下载 Hugging Face 模型；缓存后在本机测试音频上，2 秒音频约 0.67 秒完成，4 秒音频约 1.01 秒完成。真实效果需要用中文人声样本再评估。
 
 网页已接入声音画像：点击“开始录音”后会同时保存一小段浏览器音频，发送消息时先上传到 `/api/profile/audio`，后端用 `ffmpeg` 转成 16 kHz WAV，再调用本地 Python 模型输出 `ageGroup/gender`，并把结果用于本轮 agent 路由。当前实现每次请求都会启动一次 Python 进程，适合网页直接测试效果；如果要降低延迟，下一步应改成常驻 Python 推理服务。
+
+## 声纹识别与长期记忆
+
+项目已新增本地声纹身份层：用户可以在网页中录制多段注册样本，后端提取 speaker embedding 并为每个 `user_id` 维护 centroid。每轮语音输入会先尝试验证或识别说话人，只有身份可信时才读取或写入该用户的长期记忆。
+
+声纹原始音频不会长期保存。后端默认只保存 embedding、centroid、质量摘要和用户记忆 JSON：
+
+```text
+server/.data/speaker-profiles.json
+server/.data/user-memory.json
+```
+
+声纹 embedding 使用 SpeechBrain ECAPA-TDNN。首次使用前需要准备 Python 环境：
+
+```bash
+python3.11 -m venv .venv-speaker
+.venv-speaker/bin/python -m pip install --upgrade pip
+.venv-speaker/bin/python -m pip install speechbrain torch torchaudio soundfile numpy
+```
+
+本地仍需要安装 `ffmpeg`，用于把浏览器录音转成 16 kHz WAV。
+
+可调阈值在 `.env` 中配置：
+
+```bash
+SPEAKER_PYTHON_PATH=.venv-speaker/bin/python
+SPEAKER_MODEL_PATH=speechbrain/spkrec-ecapa-voxceleb
+SPEAKER_VERIFY_MIN_SIMILARITY=0.72
+SPEAKER_IDENTIFY_MIN_SIMILARITY=0.76
+SPEAKER_IDENTIFY_MIN_MARGIN=0.05
+SPEAKER_AUTO_UPDATE_MIN_SIMILARITY=0.84
+MEMORY_WRITE_MIN_CONFIDENCE=0.82
+```
+
+网页使用方式：
+
+1. 在“声纹用户”选择“自动识别”，填写昵称。
+2. 点击“录制注册样本”，连续说话约 3 秒。
+3. 至少录入 3 段有效样本后，centroid 才可用于识别。
+4. 后续对话会显示“声纹身份”和相似度。
+5. 只有识别或验证成功时，系统才读取该用户长期记忆。
+6. 说“记住我喜欢科幻故事”这类显式表达时，系统会写入当前已确认用户的长期记忆。
+7. 可以在“长期记忆”面板清除当前用户记忆，也可以关闭声纹自动优化。
+
+阈值只是本地 Demo 的起始值。真实使用前需要用同一麦克风、同一语言环境下的样本校准，尤其要测试同一用户不同距离、不同噪声，以及不同用户相近声线的情况。

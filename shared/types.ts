@@ -17,6 +17,64 @@ export interface VoiceProfileResult extends UserProfile {
   error?: string;
 }
 
+export interface VoiceQuality {
+  ok: boolean;
+  durationSeconds: number;
+  speechSeconds: number;
+  rms: number;
+  peak: number;
+  clippingRatio: number;
+  silenceRatio: number;
+  reasons: string[];
+}
+
+export interface SpeakerIdentity {
+  userId?: string;
+  displayName?: string;
+  source: "verified" | "identified" | "manual" | "unknown" | "failed";
+  confidence: number;
+  similarity?: number;
+  secondBestSimilarity?: number;
+  margin?: number;
+  quality?: VoiceQuality;
+  reason?: string;
+}
+
+export interface SpeakerUserSummary {
+  userId: string;
+  displayName?: string;
+  sampleCount: number;
+  centroidReady: boolean;
+  status: "active" | "disabled";
+  autoImproveVoiceprint: boolean;
+  updatedAt: string;
+}
+
+export interface SpeakerRegisterResponse {
+  userId: string;
+  displayName?: string;
+  sampleCount: number;
+  quality: VoiceQuality;
+  centroidReady: boolean;
+  message: string;
+}
+
+export interface UserMemorySnapshot {
+  userId: string;
+  facts: Array<{
+    id: string;
+    text: string;
+    confidence: number;
+    updatedAt: string;
+  }>;
+  preferences: Array<{
+    key: string;
+    value: string;
+    confidence: number;
+    updatedAt: string;
+  }>;
+}
+
 export interface AgentConfig {
   id: string;
   cozeBotId: string;
@@ -75,6 +133,9 @@ export interface ConverseRequest {
   currentAgentId?: string;
   lockedAgentId?: string;
   clientSessionId?: string;
+  resolvedUserId?: string;
+  speakerIdentity?: SpeakerIdentity;
+  memoryOptOut?: boolean;
   profile: UserProfile;
   conversationContext: ChatMessage[];
 }
@@ -84,6 +145,8 @@ export interface ConverseResponse {
   route: RouteOutput;
   assistantText: string;
   task?: ReminderTask;
+  memory?: UserMemorySnapshot;
+  speakerIdentity?: SpeakerIdentity;
 }
 
 export interface TaskFiredEvent {

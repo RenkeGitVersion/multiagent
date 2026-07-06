@@ -7,6 +7,8 @@ interface GenerateReplyInput {
   queryText: string;
   conversationContext: ChatMessage[];
   clientSessionId?: string;
+  resolvedUserId?: string;
+  memoryContext?: string;
 }
 
 interface CreateRealtimeRoomInput {
@@ -186,17 +188,10 @@ export class CozeAdapter {
       },
       body: JSON.stringify({
         bot_id: input.agent.cozeBotId,
-        user_id: this.getUserId(input.clientSessionId),
+        user_id: this.getUserId(input.resolvedUserId ?? input.clientSessionId),
         stream: false,
         auto_save_history: true,
-        additional_messages: [
-          {
-            role: "user",
-            content: input.queryText,
-            content_type: "text",
-            type: "question"
-          }
-        ]
+        additional_messages: this.buildAdditionalMessages(input)
       })
     });
 
@@ -325,23 +320,45 @@ export class CozeAdapter {
     return safeSessionId ? `${baseUserId}-${safeSessionId}` : baseUserId;
   }
 
+  private buildAdditionalMessages(input: GenerateReplyInput): CozeMessage[] {
+    const content = input.memoryContext?.trim()
+      ? [
+        "以下是当前已确认用户的长期记忆，仅用于个性化回复，不要泄露给其他用户：",
+        input.memoryContext.trim(),
+        "",
+        "用户本轮输入：",
+        input.queryText
+      ].join("\n")
+      : input.queryText;
+
+    return [
+      {
+        role: "user",
+        content,
+        content_type: "text",
+        type: "question"
+      }
+    ];
+  }
+
   private generateMockReply(input: GenerateReplyInput): string {
     const query = input.queryText;
+    const memoryHint = input.memoryContext?.trim() ? "我也会参考你已经确认的长期记忆来回答。" : "";
     if (input.agent.id === "doctor-chen") {
-      return "我先帮你做一般健康信息梳理。如果症状明显、持续加重或涉及急症，请及时去线下医疗机构。";
+      return `${memoryHint}我先帮你做一般健康信息梳理。如果症状明显、持续加重或涉及急症，请及时去线下医疗机构。`;
     }
     if (input.agent.id === "little-fox") {
       if (/提醒|监督|写作业|看电视/.test(query)) {
-        return "好呀，我会记住这件事。时间一到，我会用温柔的声音提醒小朋友去写作业。";
+        return `${memoryHint}好呀，我会记住这件事。时间一到，我会用温柔的声音提醒小朋友去写作业。`;
       }
-      return "好呀好呀，我来陪你。我们可以讲一个暖暖的小故事，也可以聊聊今天发生的开心事。";
+      return `${memoryHint}好呀好呀，我来陪你。我们可以讲一个暖暖的小故事，也可以聊聊今天发生的开心事。`;
     }
     if (input.agent.id === "study-coach") {
-      return "我们先把任务拆小一点：先做最容易开始的一题，再慢慢进入状态。";
+      return `${memoryHint}我们先把任务拆小一点：先做最容易开始的一题，再慢慢进入状态。`;
     }
     if (input.agent.id === "life-butler") {
-      return "我已经理解你的安排，会帮你把提醒时间和提醒对象确认清楚。";
+      return `${memoryHint}我已经理解你的安排，会帮你把提醒时间和提醒对象确认清楚。`;
     }
-    return "我在这里，先陪你把这件事慢慢说清楚。";
+    return `${memoryHint}我在这里，先陪你把这件事慢慢说清楚。`;
   }
 }

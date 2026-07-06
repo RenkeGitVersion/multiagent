@@ -105,7 +105,8 @@ select {
 }
 
 .profile-result,
-.route-result {
+.route-result,
+.identity-result {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -120,19 +121,22 @@ select {
 }
 
 .profile-result.detected,
-.route-result.detected {
+.route-result.detected,
+.identity-result.detected {
   border-color: #8dbdaf;
   background: #eef8f4;
 }
 
 .profile-result strong,
-.route-result strong {
+.route-result strong,
+.identity-result strong {
   color: #1d2626;
   font-weight: 650;
 }
 
 .profile-result em,
-.route-result em {
+.route-result em,
+.identity-result em {
   padding: 4px 8px;
   border-radius: 999px;
   color: #246b5f;
@@ -160,6 +164,19 @@ input {
 input {
   flex: 1;
   min-width: min(100%, 320px);
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+}
+
+.checkbox-label input {
+  width: 18px;
+  height: 18px;
+  min-width: auto;
 }
 
 button {
@@ -198,7 +215,8 @@ button.terminate {
 }
 
 .conversation,
-.agent-list {
+.agent-list,
+.memory-panel {
   padding: 18px;
   background: #ffffff;
   border: 1px solid #e4ded2;
@@ -285,6 +303,42 @@ h2 {
   width: 36px;
   height: 36px;
   object-fit: contain;
+}
+
+.memory-panel {
+  margin-top: 8px;
+  display: grid;
+  gap: 10px;
+}
+
+.memory-panel h2 {
+  margin-bottom: 4px;
+}
+
+.memory-list {
+  display: grid;
+  gap: 8px;
+  color: #52605d;
+}
+
+.memory-list p {
+  margin: 0;
+  color: #1d2626;
+  font-weight: 650;
+}
+
+.memory-list span {
+  display: block;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #fbfaf6;
+  border: 1px solid #e4ded2;
+  line-height: 1.5;
+}
+
+.memory-actions {
+  display: grid;
+  gap: 8px;
 }
 
 @media (max-width: 820px) {
