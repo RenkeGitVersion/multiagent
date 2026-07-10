@@ -60,10 +60,18 @@ function parseTriggerTime(text: string): Date | undefined {
   if (minuteMatch) {
     return new Date(now.getTime() + Number(minuteMatch[1]) * 60_000);
   }
+  const chineseMinuteMatch = text.match(/([一二两三四五六七八九十])\s*分钟后/);
+  if (chineseMinuteMatch) {
+    return new Date(now.getTime() + chineseNumberToInteger(chineseMinuteMatch[1]) * 60_000);
+  }
 
   const secondMatch = text.match(/(\d+)\s*秒后/);
   if (secondMatch) {
     return new Date(now.getTime() + Number(secondMatch[1]) * 1_000);
+  }
+  const chineseSecondMatch = text.match(/([一二两三四五六七八九十])\s*秒后/);
+  if (chineseSecondMatch) {
+    return new Date(now.getTime() + chineseNumberToInteger(chineseSecondMatch[1]) * 1_000);
   }
 
   const hourMinuteMatch = text.match(/(?:今天)?\s*(\d{1,2})[点:：](\d{1,2})?/);
@@ -77,4 +85,21 @@ function parseTriggerTime(text: string): Date | undefined {
   }
 
   return undefined;
+}
+
+function chineseNumberToInteger(text: string): number {
+  const map: Record<string, number> = {
+    一: 1,
+    二: 2,
+    两: 2,
+    三: 3,
+    四: 4,
+    五: 5,
+    六: 6,
+    七: 7,
+    八: 8,
+    九: 9,
+    十: 10
+  };
+  return map[text] ?? 1;
 }
