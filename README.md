@@ -81,8 +81,9 @@ npx tsx tools/agent_world.ts verify <verification_code> <answer>
 当前路由流程：
 
 1. 强意图先用规则匹配 agent 名称、别名和唤醒词。
-2. 弱意图优先调用 OpenAI-compatible Chat Completions 模型路由。
-3. 如果没有配置模型或模型调用失败，自动回退到本地规则和打分。
+2. 弱意图先基于 query、年龄/性别画像、家庭角色、时间段、长期记忆和常用 agent 召回 TOP3 候选 agent。
+3. 如果配置了 OpenAI-compatible 路由模型，只把 TOP3 候选交给 LLM 做最终语义匹配，并限制输出为短 JSON。
+4. 如果没有配置模型或模型调用失败，自动回退到 TOP3 中分数最高的本地候选。
 
 可选模型路由配置：
 
@@ -92,6 +93,7 @@ LLM_ROUTER_API_KEY=your_api_key
 LLM_ROUTER_MODEL=gpt-5.5
 LLM_ROUTER_WIRE_API=responses
 LLM_ROUTER_REASONING_EFFORT=high
+LLM_ROUTER_MAX_OUTPUT_TOKENS=80
 ```
 
 也可以填任何兼容 `/chat/completions` 的模型服务地址。
@@ -108,7 +110,16 @@ python3.11 -m venv .venv-age
 
 默认模型是 `audeering/wav2vec2-large-robust-6-ft-age-gender`，输入要求为 16 kHz WAV。首次运行会下载 Hugging Face 模型；缓存后在本机测试音频上，2 秒音频约 0.67 秒完成，4 秒音频约 1.01 秒完成。真实效果需要用中文人声样本再评估。
 
-网页已接入声音画像：点击“开始录音”后会同时保存一小段浏览器音频，发送消息时先上传到 `/api/profile/audio`，后端用 `ffmpeg` 转成 16 kHz WAV，再调用本地 Python 模型输出 `ageGroup/gender`，并把结果用于本轮 agent 路由。当前实现每次请求都会启动一次 Python 进程，适合网页直接测试效果；如果要降低延迟，下一步应改成常驻 Python 推理服务。
+网页已接入声音画像：点击“开始录音”后会同时保存一小段浏览器音频，发送消息时先上传到 `/api/profile/audio`，后端用 `ffmpeg` 转成最多 3 秒的 16 kHz WAV，再交给本地 Python 模型输出 `ageGroup/gender`，并把结果用于本轮 agent 路由。
+
+后端默认会启动一个常驻 Python 画像进程，首次请求加载 `audeering/wav2vec2-large-robust-6-ft-age-gender` 模型，后续请求通过 stdin/stdout JSONL 复用同一个模型实例，避免每轮都重新加载。若常驻进程启动或请求失败，会自动回退到单次 Python 进程；如需强制关闭常驻模式，可设置：
+
+```bash
+VOICE_PROFILE_USE_SERVICE=false
+VOICE_PROFILE_SECONDS=1.5
+VOICE_PROFILE_SERVICE_STARTUP_TIMEOUT_MS=60000
+VOICE_PROFILE_SERVICE_TIMEOUT_MS=30000
+```
 
 ## 声纹识别与长期记忆
 

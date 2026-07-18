@@ -159,6 +159,11 @@ export interface RouteOutput {
   reason: string;
   confidence: number;
   source: "strong-rule" | "model" | "rule-fallback" | "session-lock";
+  candidates?: Array<{
+    agentId: string;
+    score: number;
+    reason: string;
+  }>;
 }
 
 export interface ChatMessage {

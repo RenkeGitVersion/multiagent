@@ -1,10 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" role="img" aria-label="小狐狸">
-  <rect width="240" height="240" rx="28" fill="#fff6df"/>
-  <circle cx="120" cy="126" r="64" fill="#e97837"/>
-  <path d="M70 82 98 40l20 54zM170 82l-28-42-20 54z" fill="#c9552f"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" role="img" aria-label="虎子">
+  <rect width="240" height="240" rx="28" fill="#fff3d8"/>
+  <circle cx="120" cy="124" r="68" fill="#f4a33b"/>
+  <path d="M70 80 92 42l24 44zM170 80l-22-38-24 44z" fill="#e2872f"/>
+  <path d="M86 82c18-13 50-18 68 0" fill="none" stroke="#4a2a1d" stroke-width="7" stroke-linecap="round"/>
+  <path d="M78 108c16-7 33-8 48-2M114 96c4 16 4 35 0 50M162 108c-16-7-33-8-48-2" fill="none" stroke="#4a2a1d" stroke-width="7" stroke-linecap="round"/>
   <circle cx="96" cy="122" r="9" fill="#263230"/>
   <circle cx="144" cy="122" r="9" fill="#263230"/>
-  <path d="M112 140h16l-8 8z" fill="#263230"/>
-  <path d="M80 152c24 34 56 34 80 0-30 12-50 12-80 0z" fill="#fff4df"/>
-  <text x="120" y="210" text-anchor="middle" font-family="Arial" font-size="22" fill="#68432f">小狐狸</text>
+  <path d="M112 140h16l-8 9z" fill="#263230"/>
+  <path d="M84 152c22 26 50 26 72 0" fill="none" stroke="#7a3c21" stroke-width="7" stroke-linecap="round"/>
+  <path d="M61 126c-11-4-20-2-28 7M179 126c11-4 20-2 28 7" fill="none" stroke="#4a2a1d" stroke-width="5" stroke-linecap="round"/>
+  <text x="120" y="212" text-anchor="middle" font-family="Arial, sans-serif" font-size="24" font-weight="700" fill="#68432f">虎子</text>
 </svg>
