@@ -19,9 +19,21 @@ function routeWithLock(queryText: string, lockedAgentId: string) {
   });
 }
 
+function routeFromCurrent(queryText: string, currentAgentId: string) {
+  return routeAgentByRules({
+    queryText,
+    currentAgentId,
+    profile: { ageGroup: "adult", gender: "male" },
+    conversationContext: []
+  });
+}
+
 assert.equal(route("我要学英语").agentId, "study-coach");
 assert.equal(route("我想练口语和背单词").agentId, "study-coach");
 assert.equal(route("我有点咳嗽").agentId, "doctor-chen");
+assert.equal(route("我今天肚子有点痛。").agentId, "doctor-chen");
+assert.equal(routeFromCurrent("我今天肚子有点痛。", "study-coach").agentId, "doctor-chen");
+assert.equal(routeWithLock("我今天肚子有点痛。", "study-coach").agentId, "study-coach");
 assert.equal(route("提醒小朋友一分钟后写作业").agentId, "life-butler");
 assert.equal(route("帮我设定任务明天检查智能家居").agentId, "companion-lan");
 assert.equal(route("把客厅空调打开").agentId, "companion-lan");
