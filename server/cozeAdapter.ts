@@ -215,7 +215,7 @@ export class CozeAdapter {
 
   private readCliToken(): string | undefined {
     try {
-      const config = JSON.parse(readFileSync(`${process.env.HOME}/.coze/config.json`, "utf8")) as { accessToken?: string };
+      const config = JSON.parse(readFileSync(this.getCliConfigPath(), "utf8")) as { accessToken?: string };
       return config.accessToken;
     } catch {
       return undefined;
@@ -224,7 +224,7 @@ export class CozeAdapter {
 
   private refreshCliTokenIfNeeded(): void {
     try {
-      const config = JSON.parse(readFileSync(`${process.env.HOME}/.coze/config.json`, "utf8")) as { tokenExpiresAt?: number | string };
+      const config = JSON.parse(readFileSync(this.getCliConfigPath(), "utf8")) as { tokenExpiresAt?: number | string };
       const expiresAt = typeof config.tokenExpiresAt === "number"
         ? config.tokenExpiresAt
         : config.tokenExpiresAt ? Date.parse(config.tokenExpiresAt) : 0;
@@ -242,8 +242,8 @@ export class CozeAdapter {
       execFileSync("coze", ["auth", "status", "--format", "json"], {
         encoding: "utf8",
         env: proxy
-          ? { ...process.env, HTTPS_PROXY: proxy, HTTP_PROXY: proxy }
-          : process.env,
+          ? { ...process.env, HOME: this.getCliHome(), HTTPS_PROXY: proxy, HTTP_PROXY: proxy }
+          : { ...process.env, HOME: this.getCliHome() },
         stdio: "pipe",
         timeout: 15_000
       });
@@ -257,6 +257,16 @@ export class CozeAdapter {
   private getRefreshedCozeToken(): string | undefined {
     if (this.refreshCliToken()) return this.readCliToken();
     return undefined;
+  }
+
+  private getCliHome(): string {
+    return getRuntimeEnv("COZE_USE_PROJECT_CLI_CONFIG") === "true"
+      ? process.cwd()
+      : process.env.HOME ?? process.cwd();
+  }
+
+  private getCliConfigPath(): string {
+    return `${this.getCliHome()}/.coze/config.json`;
   }
 
   private async generateCozeReply(input: GenerateReplyInput, token: string, retryAuth = true): Promise<string | undefined> {

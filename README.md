@@ -6,11 +6,12 @@
 
 ```bash
 npm install
-cp .env.example .env
 npm run dev
 ```
 
 打开 Vite 显示的本地地址。Chrome 或 Edge 对 Web Speech API 支持最好。
+
+当前仓库已包含演示用 `.env` 和 `.coze/config.json`。`COZE_USE_PROJECT_CLI_CONFIG=true` 时，后端和 Coze CLI 刷新子进程会使用项目内的 Coze 凭证，无需依赖原机器的 `~/.coze/config.json`。
 
 ## Coze 配置
 
@@ -30,6 +31,7 @@ API token 只在后端读取，前端不会暴露。
 ```bash
 COZE_USE_MOCK=false
 COZE_USE_CLI_TOKEN=true
+COZE_USE_PROJECT_CLI_CONFIG=true
 ```
 
 `COZE_USE_CLI_TOKEN=true` 时会读取 `coze auth login --oauth` 保存的 CLI OAuth token。实测你自己的“虎子”智能体 `7645562795198742562` 可通过 OpenAPI 调用；API 管理页里的 `cztei_...` token 在当前 `/v3/chat` Bearer 调用下返回 4101，可能属于 Playground/Chat SDK 渠道令牌，不等同于 OpenAPI OAuth token。公开英语学习智能体 `7374811613293150208` 返回资源不存在/未授权，不能直接作为 API bot 使用，需要换成你自己空间里已发布到 Agent as API 的英语学习 bot。
