@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { routeAgentByRules } from "./router";
+import { recallTopAgents, routeAgentByRules } from "./router";
 import type { RouteInput } from "../shared/types";
 
 function route(queryText: string, ageGroup: RouteInput["profile"]["ageGroup"] = "adult") {
@@ -37,10 +37,62 @@ assert.equal(routeWithLock("我今天肚子有点痛。", "study-coach").agentId
 assert.equal(route("提醒小朋友一分钟后写作业").agentId, "life-butler");
 assert.equal(route("帮我设定任务明天检查智能家居").agentId, "companion-lan");
 assert.equal(route("把客厅空调打开").agentId, "companion-lan");
+assert.equal(route("今天天气怎么样").agentId, "companion-lan");
+assert.equal(route("帮我解释量子计算").agentId, "companion-lan");
 assert.equal(route("叫虎子给我讲故事").agentId, "little-fox");
 assert.equal(route("我现在需要陪小孩").agentId, "little-fox");
 assert.equal(routeWithLock("再讲一个", "little-fox").agentId, "little-fox");
 assert.equal(routeWithLock("我今天身体不舒服", "little-fox").agentId, "little-fox");
 assert.equal(routeWithLock("我今天身体不舒服", "study-coach").agentId, "study-coach");
+
+const reminderCandidates = recallTopAgents({
+  queryText: "提醒小朋友一分钟后写作业",
+  profile: { ageGroup: "adult", gender: "male" },
+  conversationContext: []
+});
+assert.equal(reminderCandidates.length, 3);
+assert.equal(reminderCandidates[0].agent.id, "life-butler");
+
+const bedtimeCandidates = recallTopAgents({
+  queryText: "睡前讲个故事",
+  profile: { ageGroup: "child", gender: "unknown" },
+  familyRole: "child",
+  timeSegment: "night",
+  conversationContext: []
+});
+assert.equal(bedtimeCandidates[0].agent.id, "little-fox");
+
+const exactMemberCandidates = recallTopAgents({
+  queryText: "今天有什么建议",
+  resolvedUserId: "user-2",
+  profile: { ageGroup: "adult", gender: "male" },
+  familyRole: "father",
+  timeSegment: "afternoon",
+  conversationContext: [],
+  familyMemory: {
+    familyId: "default-family",
+    currentTimeSegment: "afternoon",
+    members: [
+      {
+        userId: "user-1",
+        familyRole: "father",
+        favoriteAgents: [{ agentId: "life-butler", count: 20, lastUsedAt: new Date().toISOString() }],
+        memoryCount: 0,
+        updatedAt: new Date().toISOString()
+      },
+      {
+        userId: "user-2",
+        familyRole: "father",
+        favoriteAgents: [{ agentId: "companion-lan", count: 20, lastUsedAt: new Date().toISOString() }],
+        memoryCount: 0,
+        updatedAt: new Date().toISOString()
+      }
+    ],
+    sharedFacts: [],
+    agentUsage: [],
+    reminderHabits: []
+  }
+});
+assert.equal(exactMemberCandidates[0].agent.id, "companion-lan");
 
 console.log("router tests passed");

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import type { AgentConfig, ChatMessage, ConverseResponse, CozeVoiceRuntimeStatus, Gender, ReminderTask, RouteOutput, TaskFiredEvent, UserProfile, VoiceProfileResult } from "../shared/types";
+import type { AgentConfig, ChatMessage, ConverseResponse, CozeVoiceRuntimeStatus, FamilyMemorySnapshot, FamilyRole, Gender, ReminderTask, RouteOutput, SpeakerIdentity, SpeakerUserSummary, TaskFiredEvent, TimeSegment, UserMemorySnapshot, UserProfile, VoiceProfileResult } from "../shared/types";
 import "./styles.css";
 
 const apiBase = import.meta.env.VITE_API_BASE ?? "http://localhost:8787";
@@ -62,6 +62,17 @@ function App() {
   const [isProfiling, setIsProfiling] = useState(false);
   const [micLevel, setMicLevel] = useState(0);
   const [voiceProfile, setVoiceProfile] = useState<VoiceProfileResult | null>(null);
+  const [speakerIdentity, setSpeakerIdentity] = useState<SpeakerIdentity | null>(null);
+  const [registeredUsers, setRegisteredUsers] = useState<SpeakerUserSummary[]>([]);
+  const [claimedUserId, setClaimedUserId] = useState<string>("");
+  const [speakerDisplayName, setSpeakerDisplayName] = useState("");
+  const [isIdentifying, setIsIdentifying] = useState(false);
+  const [isRegisteringSpeaker, setIsRegisteringSpeaker] = useState(false);
+  const [memory, setMemory] = useState<UserMemorySnapshot | null>(null);
+  const [familyMemory, setFamilyMemory] = useState<FamilyMemorySnapshot | null>(null);
+  const [familyRole, setFamilyRole] = useState<FamilyRole>("unknown");
+  const [timeSegment, setTimeSegment] = useState<TimeSegment>(currentTimeSegment());
+  const [memoryOptOut, setMemoryOptOut] = useState(false);
   const [routeResult, setRouteResult] = useState<(RouteOutput & { agentName: string }) | null>(null);
   const [cozeVoiceStatus, setCozeVoiceStatus] = useState<CozeVoiceRuntimeStatus | null>(null);
   const [status, setStatus] = useState("准备就绪");
@@ -118,7 +129,21 @@ function App() {
         setCurrentAgent(data.agents[0]);
       })
       .catch(() => setStatus("无法连接后端服务"));
+    void refreshSpeakerUsers();
   }, []);
+
+  async function refreshSpeakerUsers() {
+    try {
+      const response = await fetch(`${apiBase}/api/speaker/users`);
+      const data = (await response.json()) as { users: SpeakerUserSummary[] };
+      setRegisteredUsers(data.users);
+      const firstReadyUser = data.users.find((user) => user.centroidReady && user.status === "active");
+      setClaimedUserId((current) => current || firstReadyUser?.userId || "");
+      if (firstReadyUser && !claimedUserId) setFamilyRole(firstReadyUser.familyRole);
+    } catch {
+      setRegisteredUsers([]);
+    }
+  }
 
   useEffect(() => {
     fetch(`${apiBase}/api/tasks`)
@@ -504,10 +529,6 @@ function App() {
     if (!queryText) return;
     const localStrongAgent = matchLocalStrongIntent(queryText);
     if (localStrongAgent && canUseRealtime(localStrongAgent) && !realtimeClientRef.current && !isRealtimeConnecting) {
-      appendMessage("user", queryText, localStrongAgent.id);
-      setDraft("");
-      setTranscript("");
-      clearSessionHold();
       setVoiceProfile({
         ...profile,
         ageYears: 0,
@@ -525,8 +546,15 @@ function App() {
         source: "strong-rule",
         agentName: localStrongAgent.displayName
       });
-      await startRealtimeVoice(localStrongAgent, extractInitialRealtimeRequest(queryText, localStrongAgent));
-      return;
+      const realtimeStarted = await startRealtimeVoice(localStrongAgent, extractInitialRealtimeRequest(queryText, localStrongAgent));
+      if (realtimeStarted) {
+        appendMessage("user", queryText, localStrongAgent.id);
+        setDraft("");
+        setTranscript("");
+        clearSessionHold();
+        latestAudioRef.current = null;
+        return;
+      }
     }
     const lockedAgentId = getLockedAgentId(Boolean(localStrongAgent));
     appendMessage("user", queryText, lockedAgentId ?? currentAgent?.id);
@@ -542,6 +570,8 @@ function App() {
       const abortController = new AbortController();
       requestAbortRef.current = abortController;
       const hasStrongRoute = Boolean(localStrongAgent);
+      await waitForAudioReady();
+      const resolvedSpeaker = await resolveSpeakerIdentity(abortController.signal);
       const routedProfile = hasStrongRoute || lockedAgentId ? skipVoiceProfile(lockedAgentId ? "session-lock" : "strong") : await resolveVoiceProfile(abortController.signal);
       setStatus(lockedAgentId ? `继续由 ${agentNameById(lockedAgentId)} 回答` : "正在路由智能体");
       const response = await fetch(`${apiBase}/api/converse`, {
@@ -553,19 +583,27 @@ function App() {
           currentAgentId: currentAgent?.id,
           lockedAgentId,
           clientSessionId: clientSessionIdRef.current,
+          resolvedUserId: resolvedSpeaker.userId,
+          identityToken: resolvedSpeaker.identityToken,
+          speakerIdentity: resolvedSpeaker,
+          memoryOptOut,
+          timeSegment,
           profile: routedProfile,
           conversationContext: messages
         })
       });
+      if (!response.ok) {
+        const errorPayload = await response.json().catch(() => ({ error: "后端请求失败" })) as { error?: string };
+        throw new Error(errorPayload.error ?? `后端请求失败：HTTP ${response.status}`);
+      }
       const data = (await response.json()) as ConverseResponse;
       setCurrentAgent(data.agent);
+      setSpeakerIdentity(data.speakerIdentity ?? resolvedSpeaker);
+      setMemory(data.memory ?? null);
+      setFamilyMemory(data.familyMemory ?? null);
+      if (data.timeSegment) setTimeSegment(data.timeSegment);
       setRouteResult(lockedAgentId ? null : { ...data.route, agentName: data.agent.displayName });
       if (data.task) addTaskToState(data.task);
-      if (canUseRealtime(data.agent) && !lockedAgentId) {
-        setStatus(`${data.agent.displayName}支持实时语音，正在切换`);
-        await startRealtimeVoice(data.agent, queryText);
-        return;
-      }
       appendMessage("assistant", data.assistantText, data.agent.id);
       setStatus(`${data.agent.displayName} 已生成回复，正在合成语音`);
       if (conversationActiveRef.current) {
@@ -585,6 +623,7 @@ function App() {
       setIsSending(false);
       isSendingRef.current = false;
       requestAbortRef.current = null;
+      latestAudioRef.current = null;
     }
   }
 
@@ -656,13 +695,19 @@ function App() {
   }
 
   function canUseRealtime(agent: AgentConfig) {
-    return Boolean(agent.cozeRealtimeTokenEnv || agent.id === "little-fox");
+    if (!cozeVoiceStatus || cozeVoiceStatus.useMock) return false;
+    const runtimeAgent = cozeVoiceStatus.realtimeAgents.find((item) => item.id === agent.id);
+    return Boolean(
+      runtimeAgent?.hasBotId
+      && runtimeAgent.hasVoiceId
+      && (runtimeAgent.hasRealtimeTokenValue || cozeVoiceStatus.hasToken)
+    );
   }
 
-  async function startRealtimeVoice(agent: AgentConfig, initialUserText?: string) {
+  async function startRealtimeVoice(agent: AgentConfig, initialUserText?: string): Promise<boolean> {
     if (!agent || agent.cozeBotId.startsWith("replace_with_")) {
       setStatus(`${agent?.displayName ?? "当前智能体"}还没有配置 Coze bot，无法启动实时语音`);
-      return;
+      return false;
     }
 
     stopListeningTurn();
@@ -693,7 +738,7 @@ function App() {
         conversationActiveRef.current = false;
         setIsConversationActive(false);
         setStatus(`需要麦克风权限才能启动${agent.displayName}实时语音`);
-        return;
+        return false;
       }
 
       const roomResponse = await fetch(`${apiBase}/api/coze/realtime-room`, {
@@ -807,6 +852,7 @@ function App() {
       startRealtimeConnectTimer(agent.displayName);
       await client.connect();
       sendInitialTextIfNeeded();
+      return true;
     } catch (error) {
       clearRealtimeConnectTimer();
       realtimeClientRef.current = null;
@@ -814,6 +860,7 @@ function App() {
       realtimeAgentIdRef.current = null;
       setStatus(error instanceof Error ? `${agent.displayName}实时语音启动失败：${error.message}` : `${agent.displayName}实时语音启动失败`);
       if (conversationActiveRef.current && !realtimeHandoffInProgressRef.current) scheduleListening(300);
+      return false;
     } finally {
       setIsRealtimeConnecting(false);
     }
@@ -1171,6 +1218,128 @@ function App() {
     }
   }
 
+  async function resolveSpeakerIdentity(signal: AbortSignal): Promise<SpeakerIdentity> {
+    const audio = latestAudioRef.current;
+    if (!audio || audio.size === 0) {
+      const selectedUser = registeredUsers.find((user) => user.userId === claimedUserId);
+      const manualIdentity: SpeakerIdentity = {
+        userId: claimedUserId || undefined,
+        displayName: selectedUser?.displayName,
+        familyRole: selectedUser?.familyRole,
+        source: claimedUserId ? "manual" : "unknown",
+        confidence: claimedUserId ? 0.5 : 0,
+        reason: claimedUserId ? "无录音，使用手动选择用户，本轮不自动写入长期记忆" : "无录音，无法确认声纹身份"
+      };
+      setSpeakerIdentity(manualIdentity);
+      return manualIdentity;
+    }
+
+    setIsIdentifying(true);
+    setStatus("正在识别声纹身份");
+    try {
+      const form = new FormData();
+      form.append("audio", audio, "speaker.webm");
+      if (claimedUserId) form.append("claimedUserId", claimedUserId);
+      form.append("assistantPlaybackRecentlyEnded", String(Date.now() - lastAssistantAudioEndedAtRef.current < 5000));
+      const response = await fetch(`${apiBase}/api/speaker/resolve`, {
+        method: "POST",
+        body: form,
+        signal
+      });
+      const result = (await response.json()) as SpeakerIdentity;
+      setSpeakerIdentity(result);
+      if (result.userId && result.identityToken) {
+        setClaimedUserId(result.userId);
+        setFamilyRole(result.familyRole ?? "unknown");
+        const memoryResponse = await fetch(`${apiBase}/api/memory/${encodeURIComponent(result.userId)}`, {
+          signal,
+          headers: { "x-speaker-identity-token": result.identityToken }
+        });
+        const memoryData = (await memoryResponse.json()) as { memory: UserMemorySnapshot };
+        setMemory(memoryData.memory);
+      } else {
+        if (result.userId) setClaimedUserId(result.userId);
+        setMemory(null);
+      }
+      return result;
+    } catch {
+      const failed: SpeakerIdentity = {
+        source: "failed",
+        confidence: 0,
+        reason: "声纹身份识别失败，本轮不写入长期记忆"
+      };
+      setSpeakerIdentity(failed);
+      return failed;
+    } finally {
+      setIsIdentifying(false);
+    }
+  }
+
+  async function registerSpeakerSample() {
+    if (isRegisteringSpeaker || isListening || isSending) return;
+    setIsRegisteringSpeaker(true);
+    setStatus("正在录制声纹注册样本，请连续说话 3 秒");
+    try {
+      await startAudioCapture();
+      await new Promise((resolve) => window.setTimeout(resolve, 3200));
+      const audio = await waitForAudioReady();
+      if (!audio || audio.size === 0) {
+        setStatus("没有录到有效声纹样本");
+        return;
+      }
+      const form = new FormData();
+      form.append("audio", audio, "speaker-register.webm");
+      if (claimedUserId) form.append("userId", claimedUserId);
+      if (speakerDisplayName.trim()) form.append("displayName", speakerDisplayName.trim());
+      form.append("familyRole", familyRole);
+      const response = await fetch(`${apiBase}/api/speaker/register`, {
+        method: "POST",
+        body: form
+      });
+      const result = await response.json() as { userId: string; displayName?: string; familyRole: FamilyRole; sampleCount: number; centroidReady: boolean; message: string };
+      setClaimedUserId(result.userId);
+      setFamilyRole(result.familyRole);
+      if (result.displayName) setSpeakerDisplayName(result.displayName);
+      setStatus(result.message);
+      await refreshSpeakerUsers();
+    } catch {
+      setStatus("声纹注册失败，请确认后端和 Python 声纹环境可用");
+    } finally {
+      latestAudioRef.current = null;
+      setIsRegisteringSpeaker(false);
+    }
+  }
+
+  async function clearCurrentMemory() {
+    if (!claimedUserId || !speakerIdentity?.identityToken) {
+      setStatus("请先完成声纹验证，再清除长期记忆");
+      return;
+    }
+    const response = await fetch(`${apiBase}/api/memory/${encodeURIComponent(claimedUserId)}`, {
+      method: "DELETE",
+      headers: { "x-speaker-identity-token": speakerIdentity.identityToken }
+    });
+    const data = (await response.json()) as { memory: UserMemorySnapshot };
+    setMemory(data.memory);
+    setStatus("已清除当前用户长期记忆");
+  }
+
+  async function toggleAutoImprove(enabled: boolean) {
+    if (!claimedUserId || !speakerIdentity?.identityToken) {
+      setStatus("请先完成声纹验证，再修改声纹优化设置");
+      return;
+    }
+    await fetch(`${apiBase}/api/speaker/auto-improve`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        "x-speaker-identity-token": speakerIdentity.identityToken
+      },
+      body: JSON.stringify({ userId: claimedUserId, enabled })
+    });
+    await refreshSpeakerUsers();
+  }
+
   function skipVoiceProfile(reason: "strong" | "session-lock" = "strong"): UserProfile {
     setVoiceProfile({
       ...profile,
@@ -1280,6 +1449,16 @@ function App() {
     window.speechSynthesis.speak(utterance);
   }
 
+  function currentSpeakerUser() {
+    return registeredUsers.find((user) => user.userId === claimedUserId);
+  }
+
+  function changeClaimedUser(userId: string) {
+    setClaimedUserId(userId);
+    const user = registeredUsers.find((item) => item.userId === userId);
+    if (user) setFamilyRole(user.familyRole);
+  }
+
   return (
     <main className="app-shell">
       <section className="stage">
@@ -1315,12 +1494,61 @@ function App() {
               <option value="male">男性</option>
             </select>
           </label>
+          <label>
+            声纹用户
+            <select value={claimedUserId} onChange={(event) => changeClaimedUser(event.target.value)}>
+              <option value="">自动识别</option>
+              {registeredUsers.map((user) => (
+                <option key={user.userId} value={user.userId}>
+                  {user.displayName || user.userId} · {familyRoleLabel(user.familyRole)}{user.centroidReady ? "" : "（未完成）"}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            注册绑定角色
+            <select value={familyRole} onChange={(event) => setFamilyRole(event.target.value as FamilyRole)}>
+              <option value="unknown">未知</option>
+              <option value="father">爸爸</option>
+              <option value="mother">妈妈</option>
+              <option value="child">孩子</option>
+              <option value="elder">长辈</option>
+              <option value="guest">访客</option>
+            </select>
+          </label>
+          <label>
+            时间段
+            <select value={timeSegment} onChange={(event) => setTimeSegment(event.target.value as TimeSegment)}>
+              <option value="morning">早上</option>
+              <option value="noon">中午</option>
+              <option value="afternoon">下午</option>
+              <option value="evening">晚上</option>
+              <option value="night">夜间</option>
+            </select>
+          </label>
+          <label>
+            昵称
+            <input value={speakerDisplayName} onChange={(event) => setSpeakerDisplayName(event.target.value)} placeholder="用于显示的用户昵称" />
+          </label>
+          <button onClick={registerSpeakerSample} disabled={isRegisteringSpeaker || isListening || isSending}>
+            {isRegisteringSpeaker ? "注册录音中" : "录制注册样本"}
+          </button>
+          <label className="checkbox-label">
+            <input type="checkbox" checked={!memoryOptOut} onChange={(event) => setMemoryOptOut(!event.target.checked)} />
+            允许长期记忆
+          </label>
         </div>
 
         <div className={voiceProfile?.source === "voice" ? "profile-result detected" : "profile-result"}>
           <span>声音画像</span>
           {renderVoiceProfile(voiceProfile)}
           {isProfiling ? <em>识别中</em> : null}
+        </div>
+
+        <div className={speakerIdentity?.userId ? "identity-result detected" : "identity-result"}>
+          <span>声纹身份</span>
+          {renderSpeakerIdentity(speakerIdentity)}
+          {isIdentifying ? <em>识别中</em> : null}
         </div>
 
         <div className={routeResult ? "route-result detected" : "route-result"}>
@@ -1392,6 +1620,23 @@ function App() {
               </span>
             </button>
           ))}
+          <section className="memory-panel">
+            <h2>长期记忆</h2>
+            {renderMemory(memory, speakerIdentity)}
+            <div className="memory-actions">
+              <button onClick={clearCurrentMemory} disabled={!claimedUserId}>清除当前记忆</button>
+              <button
+                onClick={() => toggleAutoImprove(!currentSpeakerUser()?.autoImproveVoiceprint)}
+                disabled={!claimedUserId}
+              >
+                {currentSpeakerUser()?.autoImproveVoiceprint === false ? "开启声纹优化" : "关闭声纹优化"}
+              </button>
+            </div>
+          </section>
+          <section className="memory-panel">
+            <h2>家庭记忆</h2>
+            {renderFamilyMemory(familyMemory, agents)}
+          </section>
         </div>
       </section>
 
@@ -1789,6 +2034,27 @@ function renderCozeVoiceStatus(status: CozeVoiceRuntimeStatus | null) {
   );
 }
 
+function renderSpeakerIdentity(result: SpeakerIdentity | null) {
+  if (!result) return <strong>未注册或未识别声纹</strong>;
+  const similarity = typeof result.similarity === "number" ? ` · 相似度 ${Math.round(result.similarity * 100)}%` : "";
+  const qualityReasons = result.quality?.reasons?.length ? ` · ${qualityReasonLabel(result.quality.reasons)}` : "";
+  if (result.userId) {
+    return (
+      <>
+        <strong>{result.displayName || result.userId}</strong>
+        <strong>{identitySourceLabel(result.source)} · {familyRoleLabel(result.familyRole ?? "unknown")}{similarity}</strong>
+        <span>{result.reason}</span>
+      </>
+    );
+  }
+  return (
+    <>
+      <strong>{identitySourceLabel(result.source)}</strong>
+      <span>{result.reason ?? "未确认身份，本轮不读取或写入私人长期记忆"}{qualityReasons}</span>
+    </>
+  );
+}
+
 function isCozeVoiceReady(status: CozeVoiceRuntimeStatus | null) {
   if (!status || status.useMock) return false;
   return status.hasToken || status.hasAnyRealtimeToken;
@@ -1801,6 +2067,72 @@ function isRealtimeAgentReady(agent: CozeVoiceRuntimeStatus["realtimeAgents"][nu
 function countReadyRealtimeAgents(status: CozeVoiceRuntimeStatus | null) {
   if (!status) return 0;
   return status.realtimeAgents.filter(isRealtimeAgentReady).length;
+}
+
+function renderMemory(memory: UserMemorySnapshot | null, identity: SpeakerIdentity | null) {
+  if (!identity?.userId) {
+    return <p className="empty">未确认用户身份，本轮不会读取或写入私人长期记忆。</p>;
+  }
+  if (!memory || (memory.facts.length === 0 && memory.preferences.length === 0)) {
+    return <p className="empty">当前用户暂无长期记忆。说“记住我喜欢……”可写入显式记忆。</p>;
+  }
+  return (
+    <div className="memory-list">
+      <p>当前用户：{identity.displayName || identity.userId} · {familyRoleLabel(memory.familyRole)}</p>
+      {memory.preferences.map((item) => (
+        <span key={item.key}>偏好：{item.key} = {item.value}</span>
+      ))}
+      {memory.facts.map((item) => (
+        <span key={item.id}>事实：{item.text}</span>
+      ))}
+    </div>
+  );
+}
+
+function renderFamilyMemory(memory: FamilyMemorySnapshot | null, agents: AgentConfig[]) {
+  if (!memory) return <p className="empty">暂无家庭记忆。完成一次对话后会自动生成家庭画像。</p>;
+  const agentName = (agentId: string) => agents.find((agent) => agent.id === agentId)?.displayName ?? agentId;
+  return (
+    <div className="memory-list">
+      <p>当前时间段：{timeSegmentLabel(memory.currentTimeSegment)}</p>
+      {memory.members.slice(0, 4).map((member) => (
+        <span key={member.userId}>
+          成员：{member.displayName || member.userId} · {familyRoleLabel(member.familyRole)}
+          {member.favoriteAgents[0] ? ` · 常用 ${agentName(member.favoriteAgents[0].agentId)} ${member.favoriteAgents[0].count} 次` : ""}
+        </span>
+      ))}
+      {memory.agentUsage.slice(0, 3).map((item) => (
+        <span key={item.agentId}>家庭常用智能体：{agentName(item.agentId)} · {item.count} 次</span>
+      ))}
+      {memory.reminderHabits.slice(0, 3).map((item) => (
+        <span key={item.id}>提醒习惯：{familyRoleLabel(item.familyRole)} · {timeSegmentLabel(item.timeSegment)} · {item.message}</span>
+      ))}
+      {memory.sharedFacts.slice(0, 3).map((item) => (
+        <span key={item.id}>家庭事实：{item.text}</span>
+      ))}
+    </div>
+  );
+}
+
+function identitySourceLabel(source: SpeakerIdentity["source"]) {
+  if (source === "verified") return "验证通过";
+  if (source === "identified") return "识别成功";
+  if (source === "manual") return "手动选择";
+  if (source === "failed") return "识别失败";
+  return "未确认身份";
+}
+
+function qualityReasonLabel(reasons: string[]) {
+  const labels: Record<string, string> = {
+    too_short: "语音太短",
+    too_quiet: "音量太低",
+    too_much_silence: "静音过多",
+    clipped: "爆音或削波",
+    no_speech_detected: "有效人声不足",
+    invalid_sample_rate: "采样率异常",
+    model_failed: "模型推理失败"
+  };
+  return reasons.map((reason) => labels[reason] ?? reason).join("、");
 }
 
 function renderRouteResult(result: (RouteOutput & { agentName: string }) | null) {
@@ -1855,6 +2187,38 @@ function extractInitialRealtimeRequest(queryText: string, agent: AgentConfig): s
 
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function familyRoleLabel(role: FamilyRole) {
+  const labels: Record<FamilyRole, string> = {
+    father: "爸爸",
+    mother: "妈妈",
+    child: "孩子",
+    elder: "长辈",
+    guest: "访客",
+    unknown: "未知"
+  };
+  return labels[role];
+}
+
+function timeSegmentLabel(segment: TimeSegment) {
+  const labels: Record<TimeSegment, string> = {
+    morning: "早上",
+    noon: "中午",
+    afternoon: "下午",
+    evening: "晚上",
+    night: "夜间"
+  };
+  return labels[segment];
+}
+
+function currentTimeSegment(): TimeSegment {
+  const hour = new Date().getHours();
+  if (hour >= 5 && hour < 11) return "morning";
+  if (hour >= 11 && hour < 14) return "noon";
+  if (hour >= 14 && hour < 18) return "afternoon";
+  if (hour >= 18 && hour < 22) return "evening";
+  return "night";
 }
 
 function getClientSessionId() {
