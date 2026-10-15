@@ -3,13 +3,14 @@ import type { AgentConfig, RouteInput, RouteOutput } from "../shared/types";
 
 const sceneKeywords: Record<string, string[]> = {
   故事: ["故事", "童话", "睡前", "讲一个", "哄睡"],
-  健康: ["健康", "医生", "症状", "发烧", "咳嗽", "用药", "体检", "疼", "痛", "肚子", "腹痛", "不舒服"],
+  健康: ["健康", "医生", "症状", "发烧", "咳嗽", "用药", "体检", "疼", "痛", "肚子", "腹痛", "不舒服", "血压", "血糖", "吃药", "药", "头晕", "胃胀", "胀", "做梦", "睡不好", "睡不着", "失眠"],
   学习: ["学习", "学", "英语", "英文", "单词", "口语", "语法", "数学", "语文", "作业", "考试", "题目", "复习", "课程", "计划", "辅导"],
+  英语学习: ["英语", "英文", "口语", "单词", "发音"],
   提醒: ["提醒", "监督", "看电视", "时间到", "日程", "定时"],
-  智能家居: ["智能家居", "开灯", "关灯", "空调", "电视", "窗帘", "扫地机器人", "家居"],
+  智能家居: ["智能家居", "开灯", "关灯", "空调", "电视", "窗帘", "扫地机器人", "家居", "灯", "灯光", "调暗", "调亮", "亮度"],
   通用任务: ["设定任务", "设置任务", "安排任务", "帮我记", "记一下", "待办", "todo", "通用问题"],
   陪伴: ["聊天", "心情", "难过", "无聊", "陪我", "孤独"],
-  儿童陪伴: ["小孩", "孩子", "小朋友", "儿童", "宝宝", "陪小孩", "陪孩子", "带小孩", "带孩子", "哄孩子", "哄小孩"]
+  儿童陪伴: ["小孩", "孩子", "小朋友", "儿童", "宝宝", "陪小孩", "陪孩子", "带小孩", "带孩子", "哄孩子", "哄小孩", "监督"]
 };
 
 export interface RouteCandidate {
@@ -222,12 +223,20 @@ function buildRouterSystemPrompt(candidates: RouteCandidate[]): string {
     "你是多智能体系统的弱意图路由器。只输出 JSON，不要输出 Markdown。",
     `候选 agentId 只有：${candidateIds}。不要选择候选外的 agentId。`,
     "强唤醒词已在外层处理；这里处理自然语言弱意图。",
-    "main 中的五个智能体为：little-fox=虎子，doctor-chen=健康顾问，study-coach=英语外教，life-butler=孙悟空，companion-lan=豆包。",
-    "定时、监督、提醒类任务按 main 现有规则优先选择 life-butler；冒险、解谜、鼓励选择 life-butler。",
-    "学习语言、作业、课程、考试、题目和学习计划选择 study-coach。",
-    "症状、健康、用药和体检选择 doctor-chen。",
-    "故事、睡前和儿童陪伴选择 little-fox。",
-    "智能家居、通用问题、设定任务、待办和普通闲聊选择 companion-lan。",
+    "五个智能体为：little-fox=虎子（儿童陪伴），doctor-chen=健康顾问，study-coach=英语外教，life-butler=孙悟空（闲聊陪伴），companion-lan=豆包（通用助手）。",
+    "角色选择规则（按 query 语义优先于 score）：",
+    "- 血压、血糖、吃药、症状、体检等健康管理类 → doctor-chen；",
+    "- 灯光、空调、电视等设备控制类 → companion-lan；",
+    "- 英语口语对话、发音训练、英语作文 → study-coach；'XX用英语怎么说'等单词查询、算术、语文、百科等一般学习/知识问答 → companion-lan；",
+    "- 涉及小朋友/孩子的陪伴、监督、提醒（陪玩、写作业、看电视） → little-fox；教孩子学习、孩子学习/教育类咨询 → companion-lan；",
+    "- 儿童用户（ageGroup=child）的闲聊、陪伴、故事 → little-fox；",
+    "- 故事、睡前、童话类请求 → little-fox（不受年龄限制）；",
+    "- 儿童用户（ageGroup=child）的健康咨询、睡眠问题、一般学习辅导（算术/语文/诗词/口算） → little-fox；英语口语类 → study-coach；",
+    "- 音乐、点歌类 → companion-lan；",
+    "- 成人/中老年的普通闲聊陪伴 → companion-lan；孙悟空仅承接冒险、解谜、鼓励、西游主题等陪伴；",
+    "- 一般定时提醒、待办、通用问题 → companion-lan；",
+    "- 冒险、解谜、鼓励、西游类陪伴 → life-butler。",
+    "score 仅为召回参考，以 query 语义与上述规则为准。",
     "返回 JSON：{\"agentId\":\"...\",\"reason\":\"...\",\"confidence\":0.0}"
   ].join("\n");
 }
@@ -254,19 +263,30 @@ function buildRouterPayload(input: RouteInput, candidates: RouteCandidate[]) {
 }
 
 function matchDomainIntent(query: string): { agentId: string; scene: string; keyword: string } | undefined {
+  // domain 关键词比 scene 循环更严格：裸"孩子/小朋友/英语"等词在"教孩子/写作业/单词查询"
+  // 等语境下语义不同，domain 强加分（+7）只用组合/明确词，避免教学、查询类 query 误入陪伴/外教域。
+  const domainKeywords: Record<string, string[]> = {
+    健康: ["健康", "医生", "症状", "发烧", "咳嗽", "体检", "血压", "血糖", "吃药", "用药", "疼", "痛"],
+    儿童陪伴: ["陪小孩", "陪孩子", "陪小朋友", "带小孩", "带孩子", "哄孩子", "哄小孩", "监督", "陪陪"],
+    智能家居: ["智能家居", "开灯", "关灯", "空调", "电视", "窗帘", "扫地机器人", "灯", "灯光", "调暗", "调亮", "亮度"],
+    通用任务: ["设定任务", "设置任务", "安排任务", "帮我记", "记一下", "待办"],
+    故事: ["故事", "童话", "哄睡"],
+    英语学习: ["英语口语", "英语作文", "英语发音", "学英语", "英语学习", "背单词"],
+    陪伴: ["陪我", "聊天", "唠嗑", "无聊", "心情", "难过", "孤独"]
+  };
   const domainPriority = [
-    { scene: "提醒", agentId: "life-butler" },
-    { scene: "智能家居", agentId: "companion-lan" },
-    { scene: "通用任务", agentId: "companion-lan" },
-    { scene: "学习", agentId: "study-coach" },
     { scene: "健康", agentId: "doctor-chen" },
     { scene: "儿童陪伴", agentId: "little-fox" },
+    { scene: "智能家居", agentId: "companion-lan" },
+    { scene: "通用任务", agentId: "companion-lan" },
     { scene: "故事", agentId: "little-fox" },
+    { scene: "英语学习", agentId: "study-coach" },
     { scene: "陪伴", agentId: "companion-lan" }
   ];
 
   for (const domain of domainPriority) {
-    const keyword = sceneKeywords[domain.scene]?.find((item) => query.includes(item));
+    const keywords = domainKeywords[domain.scene] ?? sceneKeywords[domain.scene];
+    const keyword = keywords.find((item) => query.includes(item));
     if (keyword) return { ...domain, keyword };
   }
   return undefined;
@@ -331,7 +351,10 @@ function scoreFamilyContext(agent: AgentConfig, input: RouteInput): number {
   if (input.familyRole === "child" && agent.id === "little-fox") score += 0.9;
   if (["father", "mother", "elder"].includes(input.familyRole ?? "") && agent.id === "life-butler") score += 0.35;
   if (input.timeSegment === "night" && /(睡前|哄睡|故事|晚安)/.test(query) && agent.id === "little-fox") score += 1.4;
-  if (input.timeSegment === "morning" && /(安排|计划|提醒|日程|今天)/.test(query) && agent.id === "life-butler") score += 0.9;
+  if (input.timeSegment === "morning" && /(安排|计划|提醒|日程|今天)/.test(query) && agent.id === "companion-lan") score += 0.9;
+  if (/(孩子|小朋友)/.test(query) && agent.id === "little-fox") score += 1.4;
+  if (input.profile.ageGroup === "child" && /(聊天|陪我|无聊|唠嗑|烦)/.test(query) && agent.id === "little-fox") score += 1.2;
+  if (input.profile.ageGroup === "child" && /(健康|发烧|咳嗽|肚子|头晕|胃胀|睡不着|做梦|吃药|血压|疼|痛|不舒服|作业|算术|数学|语文|古诗|口算|分数|学习|辅导)/.test(query) && agent.id === "little-fox") score += 1.2;
   if (input.timeSegment === "evening" && /(作业|复习|学习|英语)/.test(query) && agent.id === "study-coach") score += 0.7;
 
   const currentUserFavorite = input.familyMemory?.members
