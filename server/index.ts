@@ -6,18 +6,27 @@ import Fastify from "fastify";
 import type { WebSocket } from "ws";
 import { agents, getAgentById } from "./agents";
 import { CozeAdapter, CozeApiError } from "./cozeAdapter";
+import { FamilyMemory, getCurrentTimeSegment } from "./familyMemory";
+import { IdentityGrantStore } from "./identityGrant";
 import { ManualProfileProvider } from "./profileProvider";
 import { routeAgent, routeStrongIntent } from "./router";
+import { extractSpeakerEmbedding } from "./speakerRecognition";
+import { SpeakerStore } from "./speakerStore";
 import { extractReminder, TaskMemory } from "./taskMemory";
+import { UserMemory } from "./userMemory";
 import { analyzeVoiceProfile } from "./voiceProfile";
 import { getRuntimeEnv } from "./runtimeEnv";
-import type { ConverseRequest, CozeRealtimeAgentStatus, TaskFiredEvent } from "../shared/types";
+import type { ChatMessage, ConverseRequest, CozeRealtimeAgentStatus, FamilyMemorySnapshot, FamilyRole, TaskFiredEvent, TimeSegment, UserProfile } from "../shared/types";
 
 const server = Fastify({ logger: true });
 const coze = new CozeAdapter();
 const profiles = new ManualProfileProvider();
 const tasks = new TaskMemory();
+const speakerStore = new SpeakerStore();
+const userMemory = new UserMemory();
+const familyMemory = new FamilyMemory();
 const sockets = new Set<WebSocket>();
+const identityGrants = new IdentityGrantStore();
 
 await server.register(cors, { origin: true });
 await server.register(multipart, {
@@ -147,13 +156,157 @@ server.post("/api/transcribe/audio", async (request, reply) => {
   }
 });
 
+server.get("/api/speaker/users", async () => ({ users: await speakerStore.listUsers() }));
+
+server.post("/api/speaker/register", async (request, reply) => {
+  const audio = await request.file();
+  if (!audio) {
+    reply.code(400);
+    return { error: "Missing audio file" };
+  }
+
+  const buffer = await audio.toBuffer();
+  const embeddingResult = await extractSpeakerEmbedding(buffer, audio.mimetype);
+  return speakerStore.registerSample({
+    userId: formFieldValue(audio.fields, "userId"),
+    displayName: formFieldValue(audio.fields, "displayName"),
+    familyRole: normalizeFamilyRole(formFieldValue(audio.fields, "familyRole") as FamilyRole | undefined),
+    embeddingResult
+  });
+});
+
+server.post("/api/speaker/verify", async (request, reply) => {
+  const audio = await request.file();
+  if (!audio) {
+    reply.code(400);
+    return { error: "Missing audio file" };
+  }
+  const userId = formFieldValue(audio.fields, "userId");
+  if (!userId) {
+    reply.code(400);
+    return { error: "Missing userId" };
+  }
+
+  const buffer = await audio.toBuffer();
+  const embeddingResult = await extractSpeakerEmbedding(buffer, audio.mimetype);
+  return identityGrants.issue(await speakerStore.verify(userId, embeddingResult));
+});
+
+server.post("/api/speaker/identify", async (request, reply) => {
+  const audio = await request.file();
+  if (!audio) {
+    reply.code(400);
+    return { error: "Missing audio file" };
+  }
+
+  const buffer = await audio.toBuffer();
+  const embeddingResult = await extractSpeakerEmbedding(buffer, audio.mimetype);
+  return identityGrants.issue(await speakerStore.identify(embeddingResult));
+});
+
+server.post("/api/speaker/resolve", async (request, reply) => {
+  const audio = await request.file();
+  if (!audio) {
+    reply.code(400);
+    return { error: "Missing audio file" };
+  }
+
+  const buffer = await audio.toBuffer();
+  const embeddingResult = await extractSpeakerEmbedding(buffer, audio.mimetype);
+  return identityGrants.issue(await speakerStore.resolve({
+    embeddingResult,
+    claimedUserId: formFieldValue(audio.fields, "claimedUserId"),
+    assistantPlaybackRecentlyEnded: formFieldValue(audio.fields, "assistantPlaybackRecentlyEnded") === "true"
+  }));
+});
+
+server.patch<{ Body: { userId: string; enabled: boolean } }>("/api/speaker/auto-improve", async (request, reply) => {
+  if (!identityGrants.resolve(headerValue(request.headers["x-speaker-identity-token"]), request.body.userId)) {
+    reply.code(403);
+    return { error: "缺少有效的声纹身份凭证" };
+  }
+  const updated = await speakerStore.setAutoImprove(request.body.userId, request.body.enabled);
+  if (!updated) {
+    reply.code(404);
+    return { error: "Speaker user not found" };
+  }
+  return { user: updated };
+});
+
+server.delete<{ Params: { userId: string } }>("/api/speaker/users/:userId", async (request, reply) => {
+  if (!identityGrants.resolve(headerValue(request.headers["x-speaker-identity-token"]), request.params.userId)) {
+    reply.code(403);
+    return { error: "缺少有效的声纹身份凭证" };
+  }
+  const updated = await speakerStore.disableUser(request.params.userId);
+  if (!updated) {
+    reply.code(404);
+    return { error: "Speaker user not found" };
+  }
+  return { user: updated };
+});
+
+server.get<{ Params: { userId: string } }>("/api/memory/:userId", async (request, reply) => {
+  if (!identityGrants.resolve(headerValue(request.headers["x-speaker-identity-token"]), request.params.userId)) {
+    reply.code(403);
+    return { error: "缺少有效的声纹身份凭证" };
+  }
+  return { memory: await userMemory.getSnapshot(request.params.userId) };
+});
+
+server.delete<{ Params: { userId: string } }>("/api/memory/:userId", async (request, reply) => {
+  if (!identityGrants.resolve(headerValue(request.headers["x-speaker-identity-token"]), request.params.userId)) {
+    reply.code(403);
+    return { error: "缺少有效的声纹身份凭证" };
+  }
+  return { memory: await userMemory.clear(request.params.userId) };
+});
+
+server.get("/api/family-memory", async (_request, reply) => {
+  reply.code(403);
+  return { error: "家庭记忆只在已验证的对话上下文中返回" };
+});
+
+// 纯路由接口：只返回路由结果，不生成回复、不产生提醒等副作用。
+// 用于实时语音会话中按弱意图判断是否需要切换智能体。
+server.post<{ Body: { queryText: string; currentAgentId?: string; profile?: UserProfile; conversationContext?: ChatMessage[]; timeSegment?: TimeSegment } }>("/api/route", async (request) => {
+  const profile = await profiles.analyze({ metadata: request.body.profile });
+  const timeSegment = normalizeTimeSegment(request.body.timeSegment) ?? getCurrentTimeSegment();
+  const route = await routeAgent({
+    queryText: request.body.queryText,
+    currentAgentId: request.body.currentAgentId,
+    profile,
+    conversationContext: request.body.conversationContext ?? [],
+    timeSegment
+  });
+  const agent = getAgentById(route.agentId);
+  return { agent: { id: agent.id, displayName: agent.displayName }, route };
+});
+
 server.post<{ Body: ConverseRequest }>("/api/converse", async (request) => {
   const startedAt = Date.now();
   const profile = await profiles.analyze({ metadata: request.body.profile });
+  const timeSegment = normalizeTimeSegment(request.body.timeSegment) ?? getCurrentTimeSegment();
+  const trustedSpeakerIdentity = identityGrants.resolve(request.body.identityToken, request.body.resolvedUserId);
+  const trustedUserId = trustedSpeakerIdentity?.userId;
+  const familyRole = normalizeFamilyRole(trustedSpeakerIdentity?.familyRole);
+  const canUseMemory = Boolean(trustedUserId);
+  const personalMemoryContext = trustedUserId
+    ? await userMemory.formatForPrompt(trustedUserId)
+    : "";
+  const familyMemorySnapshot = trustedUserId
+    ? await familyMemory.getSnapshotForUser(trustedUserId, timeSegment)
+    : undefined;
+  const familyMemoryContext = canUseMemory ? await familyMemory.formatForPrompt(trustedUserId, timeSegment) : "";
+  const memoryContext = [personalMemoryContext, familyMemoryContext].filter(Boolean).join("\n\n");
   const route = await routeAgent({
     ...request.body,
+    resolvedUserId: trustedUserId,
     lockedAgentId: request.body.lockedAgentId,
-    profile
+    profile,
+    familyRole,
+    timeSegment,
+    familyMemory: familyMemorySnapshot
   });
   const routedAt = Date.now();
   const agent = getAgentById(route.agentId);
@@ -161,11 +314,50 @@ server.post<{ Body: ConverseRequest }>("/api/converse", async (request) => {
     agent,
     queryText: request.body.queryText,
     conversationContext: request.body.conversationContext,
-    clientSessionId: request.body.clientSessionId
+    clientSessionId: request.body.clientSessionId,
+    resolvedUserId: trustedUserId,
+    memoryContext
   });
 
   const reminderDraft = extractReminder(request.body.queryText, agent.id);
-  const task = reminderDraft ? tasks.schedule(reminderDraft) : undefined;
+  const task = reminderDraft
+    ? tasks.schedule({
+      ...reminderDraft,
+      userId: trustedUserId,
+      familyRole,
+      timeSegment
+    })
+    : undefined;
+  if (task && canUseMemory) await familyMemory.recordReminderHabit(task);
+
+  const memory = trustedUserId
+    ? await userMemory.writeIfAllowed({
+      userId: trustedUserId,
+      familyRole,
+      displayName: trustedSpeakerIdentity?.displayName,
+      queryText: request.body.queryText,
+      speakerIdentity: trustedSpeakerIdentity,
+      memoryOptOut: request.body.memoryOptOut
+    })
+    : undefined;
+  if (canUseMemory) {
+    await familyMemory.writeSharedIfAllowed({
+      queryText: request.body.queryText,
+      speakerIdentity: trustedSpeakerIdentity,
+      memoryOptOut: request.body.memoryOptOut
+    });
+  }
+  let updatedFamilyMemory: FamilyMemorySnapshot | undefined;
+  if (trustedUserId) {
+    await familyMemory.recordAgentUse({
+      userId: trustedUserId,
+      displayName: trustedSpeakerIdentity?.displayName,
+      familyRole,
+      agentId: agent.id,
+      memoryCount: (memory?.facts.length ?? 0) + (memory?.preferences.length ?? 0)
+    });
+    updatedFamilyMemory = await familyMemory.getSnapshotForUser(trustedUserId, timeSegment);
+  }
   request.log.info({
     queryText: request.body.queryText,
     routeSource: route.source,
@@ -178,7 +370,15 @@ server.post<{ Body: ConverseRequest }>("/api/converse", async (request) => {
     agent,
     route,
     assistantText,
-    task
+    task,
+    speakerIdentity: trustedSpeakerIdentity ?? {
+      source: "unknown",
+      confidence: 0,
+      reason: "身份凭证缺失或已过期，本轮不使用长期记忆"
+    },
+    memory,
+    familyMemory: updatedFamilyMemory,
+    timeSegment
   };
 });
 
@@ -252,4 +452,21 @@ async function transcribeAudio(buffer: Buffer, mimetype?: string, filename?: str
     model,
     elapsedMs: Date.now() - startedAt
   };
+}
+
+function formFieldValue(fields: unknown, key: string): string | undefined {
+  const field = (fields as Record<string, { value?: unknown } | undefined> | undefined)?.[key];
+  return typeof field?.value === "string" ? field.value.trim() || undefined : undefined;
+}
+
+function normalizeFamilyRole(role?: FamilyRole): FamilyRole {
+  return role && ["father", "mother", "child", "elder", "guest", "unknown"].includes(role) ? role : "unknown";
+}
+
+function normalizeTimeSegment(segment?: TimeSegment): TimeSegment | undefined {
+  return segment && ["morning", "noon", "afternoon", "evening", "night"].includes(segment) ? segment : undefined;
+}
+
+function headerValue(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
 }

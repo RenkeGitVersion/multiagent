@@ -2,6 +2,7 @@
 import argparse
 import json
 import os
+import sys
 import time
 from pathlib import Path
 
@@ -105,25 +106,22 @@ def age_group(age_years: float) -> str:
     return "senior"
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Estimate speaker age/gender with audeering 6-layer model.")
-    parser.add_argument("audio", type=Path, help="16 kHz mono/stereo wav file")
-    parser.add_argument("--seconds", type=float, default=4.0, help="Only use the first N seconds")
-    parser.add_argument("--model-path", default=os.environ.get("VOICE_PROFILE_MODEL_PATH", LOCAL_MODEL_PATH), help="HF model id or a local snapshot path")
-    args = parser.parse_args()
-
+def load_model(model_path: str):
     started = time.perf_counter()
-    feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(args.model_path, local_files_only=Path(args.model_path).exists())
-    model = AgeGenderModel.from_pretrained(args.model_path, local_files_only=Path(args.model_path).exists())
+    local_files_only = Path(model_path).exists()
+    feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(model_path, local_files_only=local_files_only)
+    model = AgeGenderModel.from_pretrained(model_path, local_files_only=local_files_only)
     model.eval()
-    load_seconds = time.perf_counter() - started
+    return feature_extractor, model, time.perf_counter() - started
+
+def analyze_audio(path: Path, seconds: float | None, feature_extractor, model, model_path: str, load_seconds: float) -> dict:
+    audio = load_audio(path, seconds)
 
     infer_started = time.perf_counter()
-    audio = load_audio(args.audio, args.seconds)
     ages = []
     gender_probs_list = []
     with torch.inference_mode():
-        for segment in make_segments(audio, args.seconds):
+        for segment in make_segments(audio, seconds):
             processed = feature_extractor(segment, sampling_rate=TARGET_SAMPLE_RATE)
             input_values = torch.from_numpy(processed["input_values"][0]).reshape(1, -1)
             _, logits_age, logits_gender = model(input_values)
@@ -136,8 +134,8 @@ def main() -> None:
     labels = ["female", "male", "child"]
     best_index = int(np.argmax(gender_probs))
 
-    print(json.dumps({
-        "model": args.model_path,
+    return {
+        "model": model_path,
         "audioSeconds": round(len(audio) / TARGET_SAMPLE_RATE, 3),
         "ageYears": round(age_years, 1),
         "ageGroup": age_group(age_years),
@@ -151,7 +149,60 @@ def main() -> None:
         "loadSeconds": round(load_seconds, 3),
         "inferenceSeconds": round(infer_seconds, 3),
         "totalSeconds": round(load_seconds + infer_seconds, 3)
-    }, ensure_ascii=False, indent=2))
+    }
+
+
+def serve(model_path: str, default_seconds: float) -> None:
+    started = time.perf_counter()
+    feature_extractor, model, load_seconds = load_model(model_path)
+    print(json.dumps({
+        "type": "ready",
+        "model": model_path,
+        "loadSeconds": round(load_seconds, 3),
+        "totalSeconds": round(time.perf_counter() - started, 3)
+    }, ensure_ascii=False), flush=True)
+
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            request = json.loads(line)
+            request_id = request.get("id")
+            audio = Path(request["audio"])
+            seconds = float(request.get("seconds", default_seconds))
+            result = analyze_audio(audio, seconds, feature_extractor, model, model_path, load_seconds)
+            result["id"] = request_id
+            result["type"] = "result"
+            print(json.dumps(result, ensure_ascii=False), flush=True)
+        except Exception as error:
+            print(json.dumps({
+                "id": locals().get("request", {}).get("id") if "request" in locals() else None,
+                "type": "error",
+                "error": str(error)
+            }, ensure_ascii=False), flush=True)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Estimate speaker age/gender with audeering 6-layer model.")
+    parser.add_argument("audio", type=Path, nargs="?", help="16 kHz mono/stereo wav file")
+    parser.add_argument("--seconds", type=float, default=4.0, help="Only use the first N seconds")
+    parser.add_argument("--model-path", default=os.environ.get("VOICE_PROFILE_MODEL_PATH", LOCAL_MODEL_PATH), help="HF model id or a local snapshot path")
+    parser.add_argument("--serve", action="store_true", help="Keep model loaded and process JSONL requests from stdin")
+    args = parser.parse_args()
+
+    if args.serve:
+        serve(args.model_path, args.seconds)
+        return
+
+    if not args.audio:
+        raise SystemExit("audio path is required unless --serve is used")
+
+    started = time.perf_counter()
+    feature_extractor, model, load_seconds = load_model(args.model_path)
+    result = analyze_audio(args.audio, args.seconds, feature_extractor, model, args.model_path, load_seconds)
+    result["totalSeconds"] = round(time.perf_counter() - started, 3)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

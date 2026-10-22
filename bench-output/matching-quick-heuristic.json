@@ -1,0 +1,82 @@
+{
+  "generatedAt": "2026-10-22T06:00:20.008Z",
+  "total": 6,
+  "failed": 0,
+  "elapsedSec": "30.1",
+  "scorer": "heuristic",
+  "results": [
+    {
+      "编号": "Q03",
+      "场景": "休闲陪伴",
+      "来源": "访谈转写",
+      "query": "今天有点烦，陪我一下",
+      "画像": "无画像输入",
+      "方法": "纯LLM(全部角色)",
+      "agentId": "life-butler",
+      "延迟ms": "3466",
+      "source": "pure-llm",
+      "reason": "用户情绪烦躁并明确希望有人陪伴，孙悟空角色覆盖闲聊与鼓励场景，适合提供轻松陪伴和情绪疏导。"
+    },
+    {
+      "编号": "Q01",
+      "场景": "休闲陪伴",
+      "来源": "访谈转写",
+      "query": "陪我聊会儿天吧",
+      "画像": "无画像输入",
+      "方法": "纯LLM(全部角色)",
+      "agentId": "little-fox",
+      "延迟ms": "6311",
+      "source": "pure-llm",
+      "reason": "用户明确希望闲聊陪伴，虎子的服务场景包含“闲聊”和“陪伴”，最符合该意图。"
+    },
+    {
+      "编号": "Q02",
+      "场景": "休闲陪伴",
+      "来源": "访谈转写",
+      "query": "我想听个故事",
+      "画像": "无画像输入",
+      "方法": "纯LLM(全部角色)",
+      "agentId": "little-fox",
+      "延迟ms": "19794",
+      "source": "pure-llm",
+      "reason": "用户想听故事，虎子的服务场景明确包含故事和睡前陪伴，最符合需求。"
+    },
+    {
+      "编号": "Q03",
+      "场景": "休闲陪伴",
+      "来源": "访谈转写",
+      "query": "今天有点烦，陪我一下",
+      "画像": "child(儿童<18)",
+      "方法": "本方法[heuristic]",
+      "agentId": "little-fox",
+      "延迟ms": "20085",
+      "source": "model",
+      "reason": "儿童用户表达烦躁并请求陪伴，属于儿童闲聊与情绪陪伴场景。"
+    },
+    {
+      "编号": "Q02",
+      "场景": "休闲陪伴",
+      "来源": "访谈转写",
+      "query": "我想听个故事",
+      "画像": "child(儿童<18)",
+      "方法": "本方法[heuristic]",
+      "agentId": "little-fox",
+      "延迟ms": "0",
+      "source": "rule-fallback",
+      "reason": "query 场景「故事」、年龄段 child、性别 unknown，召回 虎子，score=12.05；LLM 不可用，TOP3 候选兜底选择 虎子"
+    },
+    {
+      "编号": "Q01",
+      "场景": "休闲陪伴",
+      "来源": "访谈转写",
+      "query": "陪我聊会儿天吧",
+      "画像": "child(儿童<18)",
+      "方法": "本方法[heuristic]",
+      "agentId": "companion-lan",
+      "延迟ms": "0",
+      "source": "rule-fallback",
+      "reason": "年龄段 child、性别 unknown，召回 豆包，score=8.45；LLM 不可用，TOP3 候选兜底选择 豆包"
+    }
+  ],
+  "summary": "===== 匹配结果汇总（无 ground truth，仅供参考）=====\n\n[纯LLM(全部角色)] 有效判定 3 次，平均延迟 9857ms，P50 6311ms：\n  little-fox: 2 (66.7%)\n  life-butler: 1 (33.3%)\n\n[本方法[heuristic]] 有效判定 3 次，平均延迟 6695ms，P50 0ms：\n  little-fox: 2 (66.7%)\n  companion-lan: 1 (33.3%)\n\n同一 query 在不同画像下出现不同匹配结果的 query 数：2\n  编号：Q03, Q01"
+}

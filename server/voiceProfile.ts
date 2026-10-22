@@ -1,14 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { promisify } from "node:util";
 import type { VoiceProfileResult } from "../shared/types";
+import { convertUploadedAudioToWav } from "./audioUtils";
 
 const execFileAsync = promisify(execFile);
 const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const tempDir = join(projectRoot, ".tmp-audio");
 const pythonPath = join(projectRoot, ".venv-age", "bin", "python");
 const scriptPath = join(projectRoot, "tools", "profile_voice.py");
 const workerPath = join(projectRoot, "tools", "profile_voice_worker.py");
@@ -37,27 +36,13 @@ const pending = new Map<string, PendingRequest>();
 
 export async function analyzeVoiceProfile(audioBuffer: Buffer, mimeType: string): Promise<VoiceProfileResult> {
   const startedAt = Date.now();
-  const id = randomUUID();
-  const inputPath = join(tempDir, `${id}${extensionForMime(mimeType)}`);
-  const wavPath = join(tempDir, `${id}.wav`);
+  let cleanup: (() => Promise<void>) | undefined;
 
   try {
-    await mkdir(tempDir, { recursive: true });
-    await writeFile(inputPath, audioBuffer);
-    await execFileAsync("ffmpeg", [
-      "-y",
-      "-i",
-      inputPath,
-      "-ac",
-      "1",
-      "-ar",
-      "16000",
-      "-t",
-      "4",
-      wavPath
-    ]);
+    const converted = await convertUploadedAudioToWav({ audioBuffer, mimeType, maxSeconds: 3 });
+    cleanup = converted.cleanup;
 
-    const parsed = await analyzeWithWorker(wavPath).catch(() => analyzeWithOneShot(wavPath));
+    const parsed = await analyzeWithWorker(converted.wavPath).catch(() => analyzeWithOneShot(converted.wavPath));
 
     return {
       ageYears: parsed.ageYears,
@@ -80,10 +65,7 @@ export async function analyzeVoiceProfile(audioBuffer: Buffer, mimeType: string)
       error: error instanceof Error ? error.message : "Unknown voice profile error"
     };
   } finally {
-    await Promise.all([
-      rm(inputPath, { force: true }),
-      rm(wavPath, { force: true })
-    ]);
+    await cleanup?.();
   }
 }
 
@@ -107,7 +89,7 @@ async function analyzeWithWorker(wavPath: string): Promise<WorkerResult> {
   await ensureWorker();
   if (!worker) throw new Error("Voice profile worker is not available");
   const id = randomUUID();
-  const timeoutMs = Number(process.env.VOICE_PROFILE_TIMEOUT_MS ?? 4500);
+  const timeoutMs = Number(process.env.VOICE_PROFILE_SERVICE_TIMEOUT_MS ?? process.env.VOICE_PROFILE_TIMEOUT_MS ?? 30_000);
   const result = new Promise<WorkerResult>((resolve, reject) => {
     const timer = setTimeout(() => {
       pending.delete(id);
@@ -127,7 +109,10 @@ async function ensureWorker(): Promise<void> {
   });
   workerBuffer = "";
   workerReady = new Promise((resolve, reject) => {
-    const readyTimer = setTimeout(() => reject(new Error("Voice profile worker startup timed out")), 15_000);
+    const readyTimer = setTimeout(
+      () => reject(new Error("Voice profile worker startup timed out")),
+      Number(process.env.VOICE_PROFILE_SERVICE_STARTUP_TIMEOUT_MS ?? 60_000)
+    );
     worker?.stdout.on("data", (chunk: Buffer) => {
       workerBuffer += chunk.toString("utf8");
       let lineEnd = workerBuffer.indexOf("\n");

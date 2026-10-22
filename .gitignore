@@ -1,10 +1,16 @@
 node_modules/
 dist/
 .venv-age/
+.venv-speaker/
+.venv-pdf/
 .tmp-audio/
 tmp/
 __pycache__/
 .env
+.coze/config.json
+.coze/cli/
+server/.data/
+pretrained_models/
 .DS_Store
 npm-debug.log*
 yarn-debug.log*

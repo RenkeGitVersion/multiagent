@@ -7,6 +7,8 @@
     "dev": "concurrently \"npm:dev:server\" \"npm:dev:client\"",
     "dev:server": "tsx watch server/index.ts",
     "dev:client": "vite --host 0.0.0.0",
+    "test": "tsx --test server/*.test.ts",
+    "typecheck": "tsc --noEmit",
     "build": "tsc --noEmit && vite build",
     "start": "tsx server/index.ts"
   },
@@ -26,6 +28,7 @@
     "vite": "^6.1.0"
   },
   "devDependencies": {
+    "@coze/cli": "^0.3.11",
     "@types/node": "^22.13.1",
     "@types/react": "^19.0.8",
     "@types/react-dom": "^19.0.3",

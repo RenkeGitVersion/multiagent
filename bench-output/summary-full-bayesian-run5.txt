@@ -1,0 +1,18 @@
+===== 匹配结果汇总（无 ground truth，仅供参考）=====
+
+[本方法[bayesian]] 有效判定 200 次，平均延迟 6551ms，P50 3495ms：
+  companion-lan: 130 (65.0%)
+  little-fox: 34 (17.0%)
+  doctor-chen: 26 (13.0%)
+  study-coach: 9 (4.5%)
+  life-butler: 1 (0.5%)
+
+[纯LLM(全部角色)] 有效判定 50 次，平均延迟 5334ms，P50 3332ms：
+  companion-lan: 23 (46.0%)
+  little-fox: 9 (18.0%)
+  doctor-chen: 9 (18.0%)
+  life-butler: 6 (12.0%)
+  study-coach: 3 (6.0%)
+
+同一 query 在不同画像下出现不同匹配结果的 query 数：22
+  编号：Q01, Q03, Q05, Q06, Q07, Q08, Q09, Q10, Q11, Q12, Q13, Q14, Q15, Q16, Q17, Q18, Q19, Q20, Q47, Q48, Q49, Q50
