@@ -28,8 +28,17 @@ const execFileP = promisify(execFile);
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const OUT_DIR = join(__dirname, "..", "bench-output");
 const quick = process.argv.includes("--quick");
+const NO_SCORE = process.argv.includes("--noscore");
+const NO_PROFILE = process.argv.includes("--noprofile");
 const CONCURRENCY = Number(process.env.BENCH_CONCURRENCY ?? 6);
 const LLM_TIMEOUT_MS = Number(process.env.BENCH_LLM_TIMEOUT_MS ?? 30000);
+// 本方法 LLM 裁决超时（早停外的第二道延迟闸门：超时即降级 Top1 兜底）
+const OWN_LLM_TIMEOUT_MS = Number(process.env.BENCH_OWN_LLM_TIMEOUT_MS ?? 8000);
+// 早停阈值：arg 优先，其次 env，默认 0 = 不早停（全量 LLM 裁决）
+const EARLY_EXIT_ARG = process.argv.indexOf("--early-exit-margin");
+const EARLY_EXIT_MARGIN = EARLY_EXIT_ARG >= 0
+  ? Number(process.argv[EARLY_EXIT_ARG + 1])
+  : Number(process.env.LLM_EARLY_EXIT_MARGIN ?? 0);
 
 interface BenchQuery {
   id: string;
@@ -125,40 +134,46 @@ function buildRouterSystemPrompt(candidates: Array<{ agent: AgentConfig; score: 
       "返回 JSON：{\"agentId\":\"...\",\"reason\":\"...\",\"confidence\":0.0}"
     ].join("\n");
   }
-  return [
+  const lines = [
     "你是多智能体系统的弱意图路由器。只输出 JSON，不要输出 Markdown。",
     `候选 agentId 只有：${candidateIds}。不要选择候选外的 agentId。`,
     "强唤醒词已在外层处理；这里处理自然语言弱意图。",
     "五个智能体为：little-fox=虎子（儿童陪伴），doctor-chen=健康顾问，study-coach=英语外教，life-butler=孙悟空（闲聊陪伴），companion-lan=豆包（通用助手）。",
     "角色选择规则（按 query 语义优先于 score）：",
-    "- 血压、血糖、吃药、症状、体检等健康管理类 → doctor-chen；",
-    "- 灯光、空调、电视等设备控制类 → companion-lan；",
-    "- 英语口语对话、发音训练、英语作文 → study-coach；'XX用英语怎么说'等单词查询、算术、语文、百科等一般学习/知识问答 → companion-lan；",
+    "- 儿童用户（ageGroup=child）的健康咨询、症状描述、用药/血压/血糖提醒 → little-fox；成人/中老年（adult/senior）的健康咨询 → doctor-chen；",
+    "- 算术、口算、数学、古诗、语文、作文、百科等一般学习/知识问答 → companion-lan；英语口语对话、发音训练、英语作文 → study-coach；'XX用英语怎么说'仅儿童用户 → study-coach，其余 → companion-lan；",
     "- 涉及小朋友/孩子的陪伴、监督、提醒（陪玩、写作业、看电视） → little-fox；教孩子学习、孩子学习/教育类咨询 → companion-lan；",
     "- 儿童用户（ageGroup=child）的闲聊、陪伴、故事 → little-fox；",
     "- 故事、睡前、童话类请求 → little-fox（不受年龄限制）；",
-    "- 儿童用户（ageGroup=child）的健康咨询、睡眠问题、一般学习辅导（算术/语文/诗词/口算） → little-fox；英语口语类 → study-coach；",
+    "- 灯光、空调、电视等设备控制类 → companion-lan；",
     "- 音乐、点歌类 → companion-lan；",
     "- 成人/中老年的普通闲聊陪伴 → companion-lan；孙悟空仅承接冒险、解谜、鼓励、西游主题等陪伴；",
     "- 一般定时提醒、待办、通用问题 → companion-lan；",
-    "- 冒险、解谜、鼓励、西游类陪伴 → life-butler。",
-    "score 仅为召回参考，以 query 语义与上述规则为准。",
-    "返回 JSON：{\"agentId\":\"...\",\"reason\":\"...\",\"confidence\":0.0}"
-  ].join("\n");
+    "- 冒险、解谜、鼓励、西游类陪伴 → life-butler。"
+  ];
+  if (!NO_SCORE) lines.push("score 仅为召回参考，以 query 语义与上述规则为准。");
+  lines.push("返回 JSON：{\"agentId\":\"...\",\"reason\":\"...\",\"confidence\":0.0}");
+  return lines.join("\n");
 }
 
 function buildRouterPayload(queryText: string, profile: RouteInput["profile"] | undefined, candidates: Array<{ agent: AgentConfig; score: number }>) {
   const payload: Record<string, unknown> = {
     queryText,
-    candidateAgents: candidates.map((c, index) => ({
-      rank: index + 1,
-      score: Number(c.score.toFixed(3)),
-      id: c.agent.id,
-      displayName: c.agent.displayName,
-      personaTags: c.agent.personaTags,
-      serviceScenes: c.agent.serviceScenes,
-      targetAgeGroups: c.agent.targetAgeGroups
-    }))
+    candidateAgents: candidates.map((c, index) => {
+      const item: Record<string, unknown> = {
+        id: c.agent.id,
+        displayName: c.agent.displayName,
+        personaTags: c.agent.personaTags,
+        serviceScenes: c.agent.serviceScenes,
+        targetAgeGroups: c.agent.targetAgeGroups
+      };
+      // 打分与裁决解耦：noscore 模式下不向 LLM 暴露打分数字，避免数值干扰语义判断
+      if (!NO_SCORE) {
+        item.rank = index + 1;
+        item.score = Number(c.score.toFixed(3));
+      }
+      return item;
+    })
   };
   // 对照组（纯 LLM）拿不到用户画像：payload 不含 profile 字段
   if (profile) payload.profile = profile;
@@ -166,29 +181,41 @@ function buildRouterPayload(queryText: string, profile: RouteInput["profile"] | 
 }
 
 /** LLM 裁决（curl 子进程，绕过 Node fetch 的 TLS 拦截；接口与 demo 的 Responses API 完全一致） */
-async function callRouterLLM(queryText: string, profile: RouteInput["profile"] | undefined, candidates: Array<{ agent: AgentConfig; score: number }>, mode: "guided" | "plain" = "plain"): Promise<LLMResult | undefined> {
+async function callRouterLLM(queryText: string, profile: RouteInput["profile"] | undefined, candidates: Array<{ agent: AgentConfig; score: number }>, mode: "guided" | "plain" = "plain", timeoutMs = LLM_TIMEOUT_MS): Promise<LLMResult | undefined> {
   const apiKey = process.env.LLM_ROUTER_API_KEY;
   const baseUrl = process.env.LLM_ROUTER_BASE_URL;
   const model = process.env.LLM_ROUTER_MODEL;
   if (!apiKey || !baseUrl || !model) throw new Error("缺少 LLM_ROUTER_API_KEY/BASE_URL/MODEL 配置");
 
-  const body = JSON.stringify({
-    model,
-    reasoning: { effort: process.env.LLM_ROUTER_REASONING_EFFORT ?? "minimal" },
-    max_output_tokens: Number(process.env.LLM_ROUTER_MAX_OUTPUT_TOKENS ?? 80),
-    store: false,
-    input: [
-      { role: "system", content: buildRouterSystemPrompt(candidates, mode) },
-      { role: "user", content: JSON.stringify(buildRouterPayload(queryText, profile, candidates)) }
-    ]
-  });
-  const url = `${baseUrl.replace(/\/$/, "")}/responses`;
+  const wire = process.env.LLM_ROUTER_WIRE_API ?? "responses";
+  const body = wire === "chat"
+    ? JSON.stringify({
+        model,
+        temperature: 0,
+        max_tokens: Number(process.env.LLM_ROUTER_MAX_OUTPUT_TOKENS ?? 80),
+        messages: [
+          { role: "system", content: buildRouterSystemPrompt(candidates, mode) },
+          { role: "user", content: JSON.stringify(buildRouterPayload(queryText, profile, candidates)) }
+        ]
+      })
+    : JSON.stringify({
+        model,
+        reasoning: { effort: process.env.LLM_ROUTER_REASONING_EFFORT ?? "minimal" },
+        temperature: 0,
+        max_output_tokens: Number(process.env.LLM_ROUTER_MAX_OUTPUT_TOKENS ?? 80),
+        store: false,
+        input: [
+          { role: "system", content: buildRouterSystemPrompt(candidates, mode) },
+          { role: "user", content: JSON.stringify(buildRouterPayload(queryText, profile, candidates)) }
+        ]
+      });
+  const url = `${baseUrl.replace(/\/$/, "")}/${wire === "chat" ? "chat/completions" : "responses"}`;
 
   const startedAt = Date.now();
   const { stdout, stderr } = await execFileP("curl", [
     "-sS",
     "--noproxy", "*",
-    "--max-time", String(Math.ceil(LLM_TIMEOUT_MS / 1000)),
+    "--max-time", String(Math.ceil(timeoutMs / 1000)),
     "-X", "POST",
     url,
     "-H", `Authorization: Bearer ${apiKey}`,
@@ -207,9 +234,9 @@ async function callRouterLLM(queryText: string, profile: RouteInput["profile"] |
     return undefined;
   }
   try {
-    const payload = JSON.parse(stdout) as { output_text?: string; output?: Array<{ content?: Array<{ text?: string; output_text?: string; type?: string }> }> };
+    const payload = JSON.parse(stdout) as { output_text?: string; output?: Array<{ content?: Array<{ text?: string; output_text?: string; type?: string }> }>; choices?: Array<{ message?: { content?: string } }> };
     const content = payload.output?.flatMap((item) => item.content ?? []);
-    const raw = payload.output_text ?? content?.find((item) => item.output_text)?.output_text ?? content?.find((item) => item.text)?.text;
+    const raw = payload.output_text ?? content?.find((item) => item.output_text)?.output_text ?? content?.find((item) => item.text)?.text ?? payload.choices?.[0]?.message?.content;
     if (!raw) return undefined;
     const parsed = JSON.parse(raw) as { agentId?: string; reason?: string; confidence?: number };
     if (!parsed.agentId || !candidates.some((c) => c.agent.id === parsed.agentId)) return undefined;
@@ -221,14 +248,31 @@ async function callRouterLLM(queryText: string, profile: RouteInput["profile"] |
 }
 
 /** 模式 A：本方法 = 先验召回 TOP3 + LLM 裁决；LLM 失败回退 TOP3 首位 */
-async function runOwnMethod(query: BenchQuery, ageGroup: AgeGroup): Promise<{ agentId: string; reason: string; latencyMs: number; source: string }> {
+async function runOwnMethod(query: BenchQuery, ageGroup: AgeGroup, scorer: "heuristic" | "prior" | "hybrid" | "bayesian"): Promise<{ agentId: string; reason: string; latencyMs: number; source: string }> {
+  const startedLocal = Date.now();
+  const prof = NO_PROFILE ? undefined : { ageGroup, gender: GENDER };
   const input: RouteInput = {
     queryText: query.text,
-    profile: { ageGroup, gender: GENDER },
-    conversationContext: []
+    profile: prof,
+    conversationContext: [],
+    scene: query.scene,
+    priorMode: scorer
   };
   const candidates = recallTopAgents(input, 3);
-  const modelRoute = await callRouterLLM(query.text, { ageGroup, gender: GENDER }, candidates, "guided");
+  // 召回置信早停：Top1 领先 Top2 超过阈值 → 直接采用 Top1（本地打分，毫秒级），跳过 LLM
+  if (EARLY_EXIT_MARGIN > 0 && candidates.length >= 2 && candidates[0].score - candidates[1].score >= EARLY_EXIT_MARGIN) {
+    const best = candidates[0];
+    const localMs = Date.now() - startedLocal;
+    return {
+      agentId: best.agent.id,
+      reason: `${best.reason}；召回置信领先，早停直出`,
+      latencyMs: localMs,
+      source: "early-exit"
+    };
+  }
+  const llmStarted = Date.now();
+  const modelRoute = await callRouterLLM(query.text, prof, candidates, "guided", OWN_LLM_TIMEOUT_MS);
+  const llmElapsed = Date.now() - llmStarted;
   if (modelRoute) {
     return { agentId: modelRoute.agentId, reason: modelRoute.reason, latencyMs: modelRoute.latencyMs, source: "model" };
   }
@@ -236,7 +280,7 @@ async function runOwnMethod(query: BenchQuery, ageGroup: AgeGroup): Promise<{ ag
   return {
     agentId: best.agent.id,
     reason: `${best.reason}；LLM 不可用，TOP3 候选兜底选择 ${best.agent.displayName}`,
-    latencyMs: 0,
+    latencyMs: llmElapsed,
     source: "rule-fallback"
   };
 }
@@ -281,6 +325,11 @@ async function runWithConcurrency<T>(tasks: Array<() => Promise<T>>, concurrency
 }
 
 async function main() {
+  const scorerArg = process.argv.indexOf("--scorer");
+  const scorer: "heuristic" | "prior" | "hybrid" | "bayesian" =
+    (scorerArg >= 0 ? process.argv[scorerArg + 1] : "heuristic") as "heuristic" | "prior" | "hybrid" | "bayesian";
+  if (!["heuristic", "prior", "hybrid", "bayesian"].includes(scorer)) throw new Error("--scorer 仅支持 heuristic | prior | hybrid | bayesian");
+  const methodLabel = `本方法[${scorer}]`;
   const runQueries = quick ? QUERIES.slice(0, 3) : QUERIES;
   const runProfiles = quick ? PROFILES.slice(0, 1) : PROFILES;
 
@@ -297,21 +346,21 @@ async function main() {
       i += 1;
       tasks.push(async () => {
         try {
-          const out = await runOwnMethod(query, profile.ageGroup);
+          const out = await runOwnMethod(query, profile.ageGroup, scorer);
           rows.push({
             编号: query.id, 场景: query.scene, 来源: query.source, query: query.text, 画像: profile.label,
-            方法: "本方法(先验TOP3+LLM)",
+            方法: methodLabel,
             agentId: out.agentId, 延迟ms: String(out.latencyMs), source: out.source, reason: out.reason
           });
-          console.log(`[${idx + 1}/${total}] ${query.id} ${profile.label} 本方法 -> ${out.agentId} (${out.latencyMs}ms)`);
+          console.log(`[${idx + 1}/${total}] ${query.id} ${profile.label} ${methodLabel} -> ${out.agentId} (${out.latencyMs}ms)`);
         } catch (error) {
           rows.push({
             编号: query.id, 场景: query.scene, 来源: query.source, query: query.text, 画像: profile.label,
-            方法: "本方法(先验TOP3+LLM)",
+            方法: methodLabel,
             agentId: "ERROR", 延迟ms: "", source: "error",
             reason: error instanceof Error ? error.message : String(error)
           });
-          console.error(`[${idx + 1}/${total}] ${query.id} ${profile.label} 本方法 FAILED: ${error instanceof Error ? error.message : String(error)}`);
+          console.error(`[${idx + 1}/${total}] ${query.id} ${profile.label} ${methodLabel} FAILED: ${error instanceof Error ? error.message : String(error)}`);
         }
       });
     }
@@ -345,10 +394,11 @@ async function main() {
 
   const failed = rows.filter((r) => r.agentId === "ERROR").length;
   const summary = summarize(rows);
-  const payload = { generatedAt: new Date().toISOString(), total, failed, elapsedSec, results: rows, summary };
-  const jsonPath = join(OUT_DIR, `matching-${quick ? "quick" : "full"}.json`);
-  const csvPath = join(OUT_DIR, `matching-${quick ? "quick" : "full"}.csv`);
-  const summaryPath = join(OUT_DIR, `summary-${quick ? "quick" : "full"}.txt`);
+  const payload = { generatedAt: new Date().toISOString(), total, failed, elapsedSec, scorer, results: rows, summary };
+  const suffix = `${quick ? "quick" : "full"}-${scorer}`;
+  const jsonPath = join(OUT_DIR, `matching-${suffix}.json`);
+  const csvPath = join(OUT_DIR, `matching-${suffix}.csv`);
+  const summaryPath = join(OUT_DIR, `summary-${suffix}.txt`);
   writeFileSync(jsonPath, JSON.stringify(payload, null, 2), "utf8");
   writeFileSync(csvPath, toCsv(rows), "utf8");
   writeFileSync(summaryPath, summary, "utf8");

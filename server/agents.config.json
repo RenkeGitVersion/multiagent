@@ -121,7 +121,8 @@
       "英语学习",
       "口语",
       "单词",
-      "发音"
+      "发音",
+      "学习"
     ],
     "gifPath": "/agents/english-teacher.png",
     "defaultPromptHint": "用自然、鼓励的外教口吻陪用户进行英语口语对话、纠音和表达练习。",

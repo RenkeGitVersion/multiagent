@@ -1,0 +1,12 @@
+===== 匹配结果汇总（无 ground truth，仅供参考）=====
+
+[纯LLM(全部角色)] 有效判定 3 次，平均延迟 9857ms，P50 6311ms：
+  little-fox: 2 (66.7%)
+  life-butler: 1 (33.3%)
+
+[本方法[heuristic]] 有效判定 3 次，平均延迟 6695ms，P50 0ms：
+  little-fox: 2 (66.7%)
+  companion-lan: 1 (33.3%)
+
+同一 query 在不同画像下出现不同匹配结果的 query 数：2
+  编号：Q03, Q01

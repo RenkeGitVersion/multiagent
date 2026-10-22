@@ -239,21 +239,10 @@ export class CozeAdapter {
 
   private refreshCliToken(): boolean {
     if (getRuntimeEnv("COZE_USE_CLI_TOKEN") !== "true") return false;
-    const proxy = getRuntimeEnv("COZE_CLI_PROXY") || getRuntimeEnv("HTTPS_PROXY") || getRuntimeEnv("HTTP_PROXY");
-    try {
-      execFileSync("coze", ["auth", "status", "--format", "json"], {
-        encoding: "utf8",
-        env: proxy
-          ? { ...process.env, HOME: this.getCliHome(), HTTPS_PROXY: proxy, HTTP_PROXY: proxy }
-          : { ...process.env, HOME: this.getCliHome() },
-        stdio: "pipe",
-        timeout: 15_000
-      });
-      return Boolean(this.readCliToken());
-    } catch (error) {
-      console.warn(`Coze CLI token refresh failed: ${error instanceof Error ? error.message : String(error)}`);
-      return false;
-    }
+    // 注意：新版 @coze/cli (0.3.x) 在 token 刷新失败时会自动清除凭证文件，
+    // 导致后端后续无法读取。因此这里不再调用 CLI 刷新，
+    // 直接复用已保存的明文 token（有效期由 refreshCliTokenIfNeeded 判断）。
+    return Boolean(this.readCliToken());
   }
 
   private getRefreshedCozeToken(): string | undefined {
@@ -268,7 +257,15 @@ export class CozeAdapter {
   }
 
   private getCliConfigPath(): string {
-    return `${this.getCliHome()}/.coze/config.json`;
+    const cliHome = this.getCliHome();
+    // 新版 @coze/cli (>=0.3) 将凭证保存于 .coze/cli/config.json
+    const current = `${cliHome}/.coze/cli/config.json`;
+    try {
+      readFileSync(current, "utf8");
+      return current;
+    } catch {
+      return `${cliHome}/.coze/config.json`;
+    }
   }
 
   private async generateCozeReply(input: GenerateReplyInput, token: string, retryAuth = true): Promise<string | undefined> {

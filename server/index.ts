@@ -16,7 +16,7 @@ import { extractReminder, TaskMemory } from "./taskMemory";
 import { UserMemory } from "./userMemory";
 import { analyzeVoiceProfile } from "./voiceProfile";
 import { getRuntimeEnv } from "./runtimeEnv";
-import type { ConverseRequest, CozeRealtimeAgentStatus, FamilyMemorySnapshot, FamilyRole, TaskFiredEvent, TimeSegment } from "../shared/types";
+import type { ChatMessage, ConverseRequest, CozeRealtimeAgentStatus, FamilyMemorySnapshot, FamilyRole, TaskFiredEvent, TimeSegment, UserProfile } from "../shared/types";
 
 const server = Fastify({ logger: true });
 const coze = new CozeAdapter();
@@ -265,6 +265,22 @@ server.delete<{ Params: { userId: string } }>("/api/memory/:userId", async (requ
 server.get("/api/family-memory", async (_request, reply) => {
   reply.code(403);
   return { error: "家庭记忆只在已验证的对话上下文中返回" };
+});
+
+// 纯路由接口：只返回路由结果，不生成回复、不产生提醒等副作用。
+// 用于实时语音会话中按弱意图判断是否需要切换智能体。
+server.post<{ Body: { queryText: string; currentAgentId?: string; profile?: UserProfile; conversationContext?: ChatMessage[]; timeSegment?: TimeSegment } }>("/api/route", async (request) => {
+  const profile = await profiles.analyze({ metadata: request.body.profile });
+  const timeSegment = normalizeTimeSegment(request.body.timeSegment) ?? getCurrentTimeSegment();
+  const route = await routeAgent({
+    queryText: request.body.queryText,
+    currentAgentId: request.body.currentAgentId,
+    profile,
+    conversationContext: request.body.conversationContext ?? [],
+    timeSegment
+  });
+  const agent = getAgentById(route.agentId);
+  return { agent: { id: agent.id, displayName: agent.displayName }, route };
 });
 
 server.post<{ Body: ConverseRequest }>("/api/converse", async (request) => {

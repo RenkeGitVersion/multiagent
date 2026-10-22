@@ -1,10 +1,11 @@
 import { agents } from "./agents";
+import { PRIOR_MATRIX, priorStrength, saturate, detectScene, MARGINAL_PRIOR, MARGINAL_BETA } from "./prior";
 import type { AgentConfig, RouteInput, RouteOutput } from "../shared/types";
 
 const sceneKeywords: Record<string, string[]> = {
   故事: ["故事", "童话", "睡前", "讲一个", "哄睡"],
-  健康: ["健康", "医生", "症状", "发烧", "咳嗽", "用药", "体检", "疼", "痛", "肚子", "腹痛", "不舒服", "血压", "血糖", "吃药", "药", "头晕", "胃胀", "胀", "做梦", "睡不好", "睡不着", "失眠"],
-  学习: ["学习", "学", "英语", "英文", "单词", "口语", "语法", "数学", "语文", "作业", "考试", "题目", "复习", "课程", "计划", "辅导"],
+  健康: ["健康", "医生", "症状", "发烧", "咳嗽", "用药", "体检", "疼", "痛", "肚子", "腹痛", "不舒服", "血压", "血糖", "吃药", "药", "头晕", "有点晕", "胃胀", "胀", "做梦", "睡不好", "睡不着", "失眠"],
+  学习: ["学习", "学", "英语", "英文", "单词", "口语", "语法", "数学", "语文", "作业", "考试", "题目", "复习", "课程", "计划", "辅导", "算", "口算", "分数"],
   英语学习: ["英语", "英文", "口语", "单词", "发音"],
   提醒: ["提醒", "监督", "看电视", "时间到", "日程", "定时"],
   智能家居: ["智能家居", "开灯", "关灯", "空调", "电视", "窗帘", "扫地机器人", "家居", "灯", "灯光", "调暗", "调亮", "亮度"],
@@ -34,6 +35,21 @@ export async function routeAgent(input: RouteInput): Promise<RouteOutput> {
   }
 
   const candidates = recallTopAgents(input);
+
+  // 召回置信早停：Top1 显著领先 Top2 时直接采用 Top1，跳过远程 LLM 裁决（延迟优化的关键路径）
+  const earlyExitMargin = Number(process.env.LLM_EARLY_EXIT_MARGIN ?? 0);
+  if (earlyExitMargin > 0 && candidates.length >= 2 && candidates[0].score - candidates[1].score >= earlyExitMargin) {
+    const best = candidates[0];
+    return {
+      agentId: best.agent.id,
+      intentStrength: "weak",
+      reason: `${best.reason}；召回置信领先，早停直出`,
+      confidence: Math.min(0.95, Math.max(0.6, best.score / 10)),
+      source: "early-exit",
+      candidates: toRouteCandidates(candidates)
+    };
+  }
+
   const modelRoute = await routeWithModel(input, candidates);
   if (modelRoute) return modelRoute;
 
@@ -155,6 +171,7 @@ async function callResponsesRouter(baseUrl: string, apiKey: string, model: strin
     body: JSON.stringify({
       model,
       reasoning: { effort: process.env.LLM_ROUTER_REASONING_EFFORT ?? "minimal" },
+      temperature: 0,
       max_output_tokens: Number(process.env.LLM_ROUTER_MAX_OUTPUT_TOKENS ?? 80),
       store: false,
       input: [
@@ -225,13 +242,12 @@ function buildRouterSystemPrompt(candidates: RouteCandidate[]): string {
     "强唤醒词已在外层处理；这里处理自然语言弱意图。",
     "五个智能体为：little-fox=虎子（儿童陪伴），doctor-chen=健康顾问，study-coach=英语外教，life-butler=孙悟空（闲聊陪伴），companion-lan=豆包（通用助手）。",
     "角色选择规则（按 query 语义优先于 score）：",
-    "- 血压、血糖、吃药、症状、体检等健康管理类 → doctor-chen；",
-    "- 灯光、空调、电视等设备控制类 → companion-lan；",
-    "- 英语口语对话、发音训练、英语作文 → study-coach；'XX用英语怎么说'等单词查询、算术、语文、百科等一般学习/知识问答 → companion-lan；",
+    "- 儿童用户（ageGroup=child）的健康咨询、症状描述、用药/血压/血糖提醒 → little-fox；成人/中老年（adult/senior）的健康咨询 → doctor-chen；",
+    "- 算术、口算、数学、古诗、语文、作文、百科等一般学习/知识问答 → companion-lan；英语口语对话、发音训练、英语作文 → study-coach；'XX用英语怎么说'仅儿童用户 → study-coach，其余 → companion-lan；",
     "- 涉及小朋友/孩子的陪伴、监督、提醒（陪玩、写作业、看电视） → little-fox；教孩子学习、孩子学习/教育类咨询 → companion-lan；",
     "- 儿童用户（ageGroup=child）的闲聊、陪伴、故事 → little-fox；",
     "- 故事、睡前、童话类请求 → little-fox（不受年龄限制）；",
-    "- 儿童用户（ageGroup=child）的健康咨询、睡眠问题、一般学习辅导（算术/语文/诗词/口算） → little-fox；英语口语类 → study-coach；",
+    "- 灯光、空调、电视等设备控制类 → companion-lan；",
     "- 音乐、点歌类 → companion-lan；",
     "- 成人/中老年的普通闲聊陪伴 → companion-lan；孙悟空仅承接冒险、解谜、鼓励、西游主题等陪伴；",
     "- 一般定时提醒、待办、通用问题 → companion-lan；",
@@ -298,18 +314,61 @@ function matchStrongIntent(query: string): AgentConfig | undefined {
   );
 }
 
-function scoreAgent(agent: AgentConfig, input: RouteInput): number {
-  let score = agent.priority / 100;
+// 分层贝叶斯：能力似然 L_cap(a,q) + 情境似然 L_ctx(a,input)
+function bayesLikelihood(agent: AgentConfig, input: RouteInput): { cap: number; ctx: number } {
   const query = input.queryText;
+  const domain = matchDomainIntent(query);
+  let raw = 0;
+  if (domain?.agentId === agent.id) raw += 7;
+  // 通用助手兜底：domain 命中时减半（专业角色占优但通用助手仍在场）
+  if (query && agent.id === "companion-lan") raw += domain ? 0.5 : 1;
+  for (const scene of agent.serviceScenes) {
+    const keywords = sceneKeywords[scene] ?? [scene];
+    if (keywords.some((keyword) => query.includes(keyword))) raw += 3.2;
+  }
+  for (const tag of agent.personaTags) {
+    if (query.includes(tag)) raw += 1.2;
+  }
+  if (agent.targetAgeGroups.includes(input.profile?.ageGroup)) raw += 0.65;
+  if (agent.targetGenders.includes(input.profile?.gender) || agent.targetGenders.includes("unknown")) raw += 0.2;
+  // 情境信号（家庭角色/时段/儿童健康等产品设计原则）概率化
+  const ctx = saturate(scoreFamilyContext(agent, input) * 2);
+  return { cap: saturate(raw), ctx };
+}
+
+function scoreAgent(agent: AgentConfig, input: RouteInput): number {
+  const query = input.queryText;
+  const mode = input.priorMode ?? "heuristic";
+  const scene = input.scene ?? detectScene(query);
+
+  // 分层贝叶斯模式：score = 能力似然 + 情境似然 + β·角色边际先验 + λ(g,c)·问卷群体先验
+  // 参数全部来自问卷与领域知识（不针对测试集调参）
+  if (mode === "bayesian") {
+    const { cap, ctx } = bayesLikelihood(agent, input);
+    const cell = PRIOR_MATRIX[input.profile?.ageGroup]?.[scene ?? ""];
+    const P0 = cell ? (cell[agent.id] ?? 0) / 100 : 0;
+    return cap + ctx + MARGINAL_BETA * MARGINAL_PRIOR[agent.id] + priorStrength(input.profile?.ageGroup, scene) * P0;
+  }
+
+  let score = agent.priority / 100;
   const domain = matchDomainIntent(query);
   if (domain?.agentId === agent.id) score += 7;
   if (!domain && query && agent.id === "companion-lan") score += 1;
 
-  if (agent.targetAgeGroups.includes(input.profile.ageGroup)) score += 0.65;
-  if (agent.targetGenders.includes(input.profile.gender) || agent.targetGenders.includes("unknown")) {
+  if (agent.targetAgeGroups.includes(input.profile?.ageGroup)) score += 0.65;
+  if (agent.targetGenders.includes(input.profile?.gender) || agent.targetGenders.includes("unknown")) {
     score += 0.2;
   }
-  score += scoreFamilyContext(agent, input);
+
+  // 召回层评分模式：heuristic（默认/v5）、prior（仅问卷群体先验）、hybrid（启发式+先验融合）
+  if (mode === "prior") {
+    score += scorePrior(agent, input.profile?.ageGroup, scene);
+  } else {
+    score += scoreFamilyContext(agent, input);
+    if (mode === "hybrid") {
+      score += scorePrior(agent, input.profile?.ageGroup, scene);
+    }
+  }
 
   for (const scene of agent.serviceScenes) {
     const keywords = sceneKeywords[scene] ?? [scene];
@@ -336,8 +395,8 @@ function buildCandidateReason(agent: AgentConfig, input: RouteInput, score: numb
   if (matchedScenes.length > 0) {
     reasons.push(`query 场景「${matchedScenes.join("、")}」`);
   }
-  if (agent.targetAgeGroups.includes(input.profile.ageGroup)) reasons.push(`年龄段 ${input.profile.ageGroup}`);
-  if (agent.targetGenders.includes(input.profile.gender) || agent.targetGenders.includes("unknown")) reasons.push(`性别 ${input.profile.gender}`);
+  if (agent.targetAgeGroups.includes(input.profile?.ageGroup)) reasons.push(`年龄段 ${input.profile?.ageGroup}`);
+  if (agent.targetGenders.includes(input.profile?.gender) || agent.targetGenders.includes("unknown")) reasons.push(`性别 ${input.profile?.gender}`);
   if (input.familyRole && input.familyRole !== "unknown") reasons.push(`家庭角色 ${input.familyRole}`);
   if (input.timeSegment) reasons.push(`时间段 ${input.timeSegment}`);
   if (input.familyMemory?.agentUsage.some((item) => item.agentId === agent.id)) reasons.push("家庭常用 agent");
@@ -353,8 +412,10 @@ function scoreFamilyContext(agent: AgentConfig, input: RouteInput): number {
   if (input.timeSegment === "night" && /(睡前|哄睡|故事|晚安)/.test(query) && agent.id === "little-fox") score += 1.4;
   if (input.timeSegment === "morning" && /(安排|计划|提醒|日程|今天)/.test(query) && agent.id === "companion-lan") score += 0.9;
   if (/(孩子|小朋友)/.test(query) && agent.id === "little-fox") score += 1.4;
-  if (input.profile.ageGroup === "child" && /(聊天|陪我|无聊|唠嗑|烦)/.test(query) && agent.id === "little-fox") score += 1.2;
-  if (input.profile.ageGroup === "child" && /(健康|发烧|咳嗽|肚子|头晕|胃胀|睡不着|做梦|吃药|血压|疼|痛|不舒服|作业|算术|数学|语文|古诗|口算|分数|学习|辅导)/.test(query) && agent.id === "little-fox") score += 1.2;
+  // 教育类咨询：教孩子/辅导/孩子学习等 → 通用助手（与 LLM 裁决规则"教孩子学习→companion-lan"对齐）
+  if (/(教孩子|怎么教|辅导孩子|孩子教育|教育孩子|孩子学习|孩子写作业|走神|厌学)/.test(query) && agent.id === "companion-lan") score += 1.2;
+  if (input.profile?.ageGroup === "child" && /(聊天|陪我|无聊|唠嗑|烦)/.test(query) && agent.id === "little-fox") score += 1.2;
+  if (input.profile?.ageGroup === "child" && /(健康|发烧|咳嗽|肚子|头晕|胃胀|睡不着|做梦|吃药|血压|疼|痛|不舒服|作业|算术|数学|语文|古诗|口算|分数|学习|辅导)/.test(query) && agent.id === "little-fox") score += 1.2;
   if (input.timeSegment === "evening" && /(作业|复习|学习|英语)/.test(query) && agent.id === "study-coach") score += 0.7;
 
   const currentUserFavorite = input.familyMemory?.members

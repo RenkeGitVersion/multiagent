@@ -149,11 +149,15 @@ export interface RouteInput {
   currentAgentId?: string;
   lockedAgentId?: string;
   resolvedUserId?: string;
-  profile: UserProfile;
+  profile?: UserProfile;
   familyRole?: FamilyRole;
   timeSegment?: TimeSegment;
   familyMemory?: FamilyMemorySnapshot;
   conversationContext: ChatMessage[];
+  /** 场景（由意图判别模块识别后注入；缺省时由场景关键词推断） */
+  scene?: string;
+  /** 召回层评分模式：heuristic=启发式（默认，v5 行为）；prior=仅问卷群体先验；hybrid=启发式+先验融合；bayesian=分层贝叶斯（能力似然×群体先验） */
+  priorMode?: "heuristic" | "prior" | "hybrid" | "bayesian";
 }
 
 export interface RouteOutput {

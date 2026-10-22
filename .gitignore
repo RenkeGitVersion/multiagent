@@ -8,6 +8,7 @@ tmp/
 __pycache__/
 .env
 .coze/config.json
+.coze/cli/
 server/.data/
 pretrained_models/
 .DS_Store

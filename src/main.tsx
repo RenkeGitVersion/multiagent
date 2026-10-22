@@ -805,6 +805,9 @@ function App() {
           appendMessage("user", finalText, agent.id);
         }
         setStatus(`已听到，${agent.displayName}正在想`);
+        if (finalText && !realtimeHandoffInProgressRef.current) {
+          void maybeHandoffRealtimeWeakIntent(finalText);
+        }
       });
       client.on(EventNames.AUDIO_AGENT_SPEECH_STARTED, () => {
         clearRealtimeIdleTimer();
@@ -971,32 +974,62 @@ function App() {
     const strongAgent = matchLocalStrongIntent(queryText);
     const realtimeAgentId = realtimeAgentIdRef.current;
     if (!strongAgent || !realtimeAgentId || strongAgent.id === realtimeAgentId) return;
+    await handoffRealtimeTo(strongAgent, queryText, "strong", `实时语音中命中${strongAgent.displayName}唤醒词，切换到 Coze 实时语音`, "strong-rule");
+  }
 
+  async function handoffRealtimeTo(agent: AgentConfig, queryText: string, intentStrength: "strong" | "weak", reason: string, source: "strong-rule" | "model" | "rule-fallback" | "session-lock") {
     realtimeHandoffInProgressRef.current = true;
-    setStatus(`听到强意图：切换到 ${strongAgent.displayName}`);
+    setStatus(`识别到意图：切换到 ${agent.displayName}`);
     try {
       await realtimeClientRef.current?.interrupt();
     } catch {
       // Continue with the handoff even if the interrupt command fails.
     }
     await stopRealtimeVoice();
-    setCurrentAgent(strongAgent);
+    setCurrentAgent(agent);
     setTranscript("");
-    if (canUseRealtime(strongAgent)) {
-      appendMessage("user", queryText, strongAgent.id);
+    if (canUseRealtime(agent)) {
+      appendMessage("user", queryText, agent.id);
       setRouteResult({
-        agentId: strongAgent.id,
-        intentStrength: "strong",
-        reason: `实时语音中命中${strongAgent.displayName}唤醒词，切换到 Coze 实时语音`,
-        confidence: 0.98,
-        source: "strong-rule",
-        agentName: strongAgent.displayName
+        agentId: agent.id,
+        intentStrength,
+        reason,
+        confidence: intentStrength === "strong" ? 0.98 : 0.86,
+        source,
+        agentName: agent.displayName
       });
-      await startRealtimeVoice(strongAgent, extractInitialRealtimeRequest(queryText, strongAgent));
+      await startRealtimeVoice(agent, extractInitialRealtimeRequest(queryText, agent));
     } else {
       await sendMessage(queryText);
     }
     realtimeHandoffInProgressRef.current = false;
+  }
+
+  async function maybeHandoffRealtimeWeakIntent(queryText: string) {
+    const realtimeAgentId = realtimeAgentIdRef.current;
+    if (!realtimeAgentId || realtimeHandoffInProgressRef.current) return;
+    if (queryText.length < 4) return;
+    try {
+      const response = await fetch(`${apiBase}/api/route`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          queryText,
+          currentAgentId: currentAgent?.id ?? realtimeAgentId,
+          profile,
+          conversationContext: messages,
+          timeSegment
+        })
+      });
+      if (!response.ok) return;
+      const data = (await response.json()) as { agent?: AgentConfig; route?: RouteOutput };
+      const target = data.agent;
+      if (!target?.id || target.id === realtimeAgentId) return;
+      if (data.route?.intentStrength === "strong") return;
+      await handoffRealtimeTo(target, queryText, "weak", `实时语音中识别到「${target.displayName}」意图，切换到 ${target.displayName}`, data.route?.source ?? "model");
+    } catch {
+      // 弱意图路由检查失败时不打断当前会话
+    }
   }
 
   function stopCurrentAudio() {
